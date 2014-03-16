@@ -43,6 +43,7 @@ type Response struct {
 
 func main() {
 	verbose := flag.Bool("v", false, "should every proxy request be logged to stdout")
+	mongourl := flag.String("mongourl", "", "record request/response in mongodb")
 	mock := flag.Bool("m", false, "send fake responses")
 	addr := flag.String("l", ":8080", "on which address should the proxy listen")
 	proxy := goproxy.NewProxyHttpServer()
@@ -50,17 +51,21 @@ func main() {
 
 	flag.Parse()
 
-	// Mongo DB connection
-	session, err := mgo.Dial("localhost:17017")
-	if err != nil {
-		panic(err)
+	c := &mgo.Collection{}
+
+	if len(*mongourl) != 0 {
+		// Mongo DB connection
+		session, err := mgo.Dial(*mongourl)
+		if err != nil {
+			panic(err)
+		}
+		defer session.Close()
+
+		// Optional. Switch the session to a monotonic behavior.
+		session.SetMode(mgo.Monotonic, true)
+
+		c = session.DB("proxyservice").C("log")
 	}
-	defer session.Close()
-
-	// Optional. Switch the session to a monotonic behavior.
-	session.SetMode(mgo.Monotonic, true)
-
-	c := session.DB("proxyservice").C("log")
 
 	proxy.OnRequest().HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 		fmt.Println("received connect for", host)
@@ -82,7 +87,7 @@ func main() {
 
 		}
 
-		if *mock && req.Method != "CONNECT" {
+		if c != nil && *mock && req.Method != "CONNECT" {
 			result := Content{}
 			fmt.Println("Looking for existing request")
 			/*fmt.Println("RequestURI:", req.RequestURI)
@@ -117,7 +122,7 @@ func main() {
 
 	proxy.OnResponse().Do(goproxy_html.HandleString(
 		func(s string, ctx *goproxy.ProxyCtx) string {
-			if ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Req.Method != "CONNECT" && ctx.Resp.StatusCode == 200 {
+			if c != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Req.Method != "CONNECT" && ctx.Resp.StatusCode == 200 {
 				fmt.Println("We should probably save this response")
 				content := Content{
 					//Id: bson.NewObjectId(),
