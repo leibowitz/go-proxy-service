@@ -5,8 +5,12 @@ import (
 	"labix.org/v2/mgo"
 	"labix.org/v2/mgo/bson"
 	"log"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elazarl/goproxy"
@@ -38,6 +42,34 @@ type Response struct {
 	Body    string      "body"
 	Headers http.Header "headers"
 	Status  int         "status"
+}
+
+type stoppableListener struct {
+	net.Listener
+	sync.WaitGroup
+}
+
+type stoppableConn struct {
+	net.Conn
+	wg *sync.WaitGroup
+}
+
+func newStoppableListener(l net.Listener) *stoppableListener {
+	return &stoppableListener{l, sync.WaitGroup{}}
+}
+
+func (sl *stoppableListener) Accept() (net.Conn, error) {
+	c, err := sl.Listener.Accept()
+	if err != nil {
+		return c, err
+	}
+	sl.Add(1)
+	return &stoppableConn{c, &sl.WaitGroup}, nil
+}
+
+func (sc *stoppableConn) Close() error {
+	sc.wg.Done()
+	return sc.Conn.Close()
 }
 
 func main() {
@@ -139,6 +171,24 @@ func main() {
 			return s
 		}))
 
+	l, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Fatal("listen:", err)
+	}
+	sl := newStoppableListener(l)
+	ch := make(chan os.Signal)
+	signal.Notify(ch, os.Interrupt)
+	go func() {
+		<-ch
+		log.Println("Exitting")
+		sl.Add(1)
+		sl.Close()
+		sl.Done()
+	}()
+	signal.Notify(ch, os.Interrupt)
+
 	log.Println("Starting Proxy")
-	log.Fatalln(http.ListenAndServe(*addr, proxy))
+	log.Fatalln(http.Serve(sl, proxy))
+	sl.Wait()
+
 }
