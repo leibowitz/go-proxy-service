@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"labix.org/v2/mgo"
 	"labix.org/v2/mgo/bson"
 	"log"
@@ -46,8 +45,6 @@ func main() {
 	mongourl := flag.String("mongourl", "", "record request/response in mongodb")
 	mock := flag.Bool("m", false, "send fake responses")
 	addr := flag.String("l", ":8080", "on which address should the proxy listen")
-	proxy := goproxy.NewProxyHttpServer()
-	proxy.Verbose = *verbose
 
 	flag.Parse()
 
@@ -67,8 +64,11 @@ func main() {
 		c = session.DB("proxyservice").C("log")
 	}
 
+	proxy := goproxy.NewProxyHttpServer()
+	proxy.Verbose = *verbose
+
 	proxy.OnRequest().HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
-		fmt.Println("received connect for", host)
+		ctx.Logf("received connect for", host)
 		return goproxy.MitmConnect, host
 	})
 
@@ -89,14 +89,14 @@ func main() {
 
 		if c != nil && *mock && req.Method != "CONNECT" {
 			result := Content{}
-			fmt.Println("Looking for existing request")
+			ctx.Logf("Looking for existing request")
 			/*fmt.Println("RequestURI:", req.RequestURI)
 			  fmt.Println("Path:", req.URL.Path)
 			  fmt.Println("Host:", req.Host)
 			  fmt.Println("Method:", req.Method)*/
 			err := c.Find(bson.M{"request.host": req.Host, "request.method": req.Method, "response.status": 200, "request.path": req.URL.Path}).Sort("-request.date").One(&result)
 			if err == nil {
-				fmt.Println("Found one")
+				ctx.Logf("Found one")
 				/*fmt.Println("Path:", result.Request.Path)
 				  //fmt.Println("Body:", result.Request.Body)
 				  fmt.Println("Method:", result.Request.Method)
@@ -123,7 +123,7 @@ func main() {
 	proxy.OnResponse().Do(goproxy_html.HandleString(
 		func(s string, ctx *goproxy.ProxyCtx) string {
 			if c != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Req.Method != "CONNECT" && ctx.Resp.StatusCode == 200 {
-				fmt.Println("We should probably save this response")
+				ctx.Logf("We should probably save this response")
 				content := Content{
 					//Id: bson.NewObjectId(),
 					Request:  Request{Path: ctx.Req.URL.Path, Host: ctx.Req.Host, Method: ctx.Req.Method, Date: time.Now(), Time: float32(ctx.UserData.(ContextUserData).Time) / 1.0e9, Headers: ctx.Req.Header},
@@ -131,11 +131,11 @@ func main() {
 
 				err := c.Insert(content)
 				if err != nil {
-					fmt.Printf("Can't insert document: %v\n", err)
+					ctx.Logf("Can't insert document: %v\n", err)
 				}
 			}
 
-			fmt.Println(s)
+			ctx.Logf(s)
 			return s
 		}))
 
