@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/elazarl/goproxy"
-	"github.com/elazarl/goproxy/ext/html"
+	//"github.com/elazarl/goproxy/ext/html"
 )
 
 type ContextUserData struct {
@@ -120,10 +120,13 @@ func main() {
 		return req, nil
 	})
 
-	proxy.OnResponse().Do(goproxy_html.HandleString(
-		func(s string, ctx *goproxy.ProxyCtx) string {
-			if c != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.Request.Method != "CONNECT" && ctx.Resp.StatusCode == 200 {
-				ctx.Logf("We should probably save this response")
+	proxy.OnResponse().Do(goproxy.HandleBytes(
+		func(b []byte, ctx *goproxy.ProxyCtx) []byte {
+			ctx.Logf("Method: %s - host: %s", ctx.Resp.Request.Method, ctx.Resp.Request.Host)
+			if c != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.StatusCode == 200 && ctx.Resp.Request.Method != "CONNECT" {
+				// Get Body as string
+				s := string(b[:])
+				ctx.Logf("Recording both request/response")
 				content := Content{
 					//Id: bson.NewObjectId(),
 					Request:  Request{Path: ctx.Resp.Request.URL.Path, Host: ctx.Resp.Request.Host, Method: ctx.Resp.Request.Method, Date: time.Now(), Time: float32(ctx.UserData.(ContextUserData).Time) / 1.0e9, Headers: ctx.Resp.Request.Header},
@@ -133,10 +136,10 @@ func main() {
 				if err != nil {
 					ctx.Logf("Can't insert document: %v\n", err)
 				}
+				ctx.Logf("Body: %s", s)
 			}
 
-			ctx.Logf(s)
-			return s
+			return b
 		}))
 
 	log.Println("Starting Proxy")
