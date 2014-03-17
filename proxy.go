@@ -122,11 +122,11 @@ func main() {
 
 	proxy.OnResponse().Do(goproxy_html.HandleString(
 		func(s string, ctx *goproxy.ProxyCtx) string {
-			if c != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Req.Method != "CONNECT" && ctx.Resp.StatusCode == 200 {
+			if c != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.Request.Method != "CONNECT" && ctx.Resp.StatusCode == 200 {
 				ctx.Logf("We should probably save this response")
 				content := Content{
 					//Id: bson.NewObjectId(),
-					Request:  Request{Path: ctx.Req.URL.Path, Host: ctx.Req.Host, Method: ctx.Req.Method, Date: time.Now(), Time: float32(ctx.UserData.(ContextUserData).Time) / 1.0e9, Headers: ctx.Req.Header},
+					Request:  Request{Path: ctx.Resp.Request.URL.Path, Host: ctx.Resp.Request.Host, Method: ctx.Resp.Request.Method, Date: time.Now(), Time: float32(ctx.UserData.(ContextUserData).Time) / 1.0e9, Headers: ctx.Resp.Request.Header},
 					Response: Response{Status: ctx.Resp.StatusCode, Headers: ctx.Resp.Header, Body: s}}
 
 				err := c.Insert(content)
