@@ -136,7 +136,7 @@ func main() {
 				if err != nil {
 					ctx.Logf("Can't insert document: %v\n", err)
 				}
-				ctx.Logf("Body: %s", s)
+				//ctx.Logf("Body: %s", s)
 			}
 
 			return b
