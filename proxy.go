@@ -124,19 +124,25 @@ func main() {
 			if c != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.StatusCode == 200 && ctx.Resp.Request.Method != "CONNECT" {
 				// Get Body as string
 				s := string(b[:])
-				ctx.Logf("Recording both request/response")
-				content := Content{
-					//Id: bson.NewObjectId(),
-					Request:  Request{Path: ctx.Resp.Request.URL.Path, Host: ctx.Resp.Request.Host, Method: ctx.Resp.Request.Method, Time: float32(time.Now().UnixNano() - ctx.UserData.(ContextUserData).Time) / 1.0e9, Headers: ctx.Resp.Request.Header},
-					Response: Response{Status: ctx.Resp.StatusCode, Headers: ctx.Resp.Header, Body: s},
-                    Date: time.Now(), 
-                    }
+				contentType := ctx.Resp.Header.Get("Content-Type")
+				ctx.Logf(contentType)
+				arr := strings.Split(contentType, ";")
+				switch arr[0] {
+				case "application/json", "text/html":
+					ctx.Logf("Recording both request/response")
+					content := Content{
+						//Id: bson.NewObjectId(),
+						Request:  Request{Path: ctx.Resp.Request.URL.Path, Host: ctx.Resp.Request.Host, Method: ctx.Resp.Request.Method, Time: float32(time.Now().UnixNano()-ctx.UserData.(ContextUserData).Time) / 1.0e9, Headers: ctx.Resp.Request.Header},
+						Response: Response{Status: ctx.Resp.StatusCode, Headers: ctx.Resp.Header, Body: s},
+						Date:     time.Now(),
+					}
 
-				err := c.Insert(content)
-				if err != nil {
-					ctx.Logf("Can't insert document: %v\n", err)
+					err := c.Insert(content)
+					if err != nil {
+						ctx.Logf("Can't insert document: %v\n", err)
+					}
+					ctx.Logf("Body: %s", s)
 				}
-				//ctx.Logf("Body: %s", s)
 			}
 
 			return b
