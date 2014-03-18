@@ -107,7 +107,7 @@ func main() {
 				  fmt.Println("Status:", result.Response.Status)
 				  fmt.Println("Headers:", result.Response.Headers)*/
 
-				resp := goproxy.NewResponse(req, goproxy.ContentTypeHtml, result.Response.Status, result.Response.Body)
+				resp := goproxy.NewResponse(req, result.Response.Headers.Get("Content-Type"), result.Response.Status, result.Response.Body)
 				ctx.UserData = ContextUserData{Store: false, Time: 0}
 				return req, resp
 			}
