@@ -62,7 +62,7 @@ func main() {
 		// Optional. Switch the session to a monotonic behavior.
 		session.SetMode(mgo.Monotonic, true)
 
-		c = session.DB("proxyservice").C("log")
+		c = session.DB("proxyservice").C("log_logentry")
 	}
 
 	proxy := goproxy.NewProxyHttpServer()
