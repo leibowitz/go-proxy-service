@@ -22,11 +22,12 @@ type Content struct {
 	//Id bson.ObjectId
 	Request  Request  "request"
 	Response Response "response"
+	Date    time.Time   "date"
 }
 
 type Request struct {
 	Body    string      "body"
-	Date    time.Time   "date"
+	//Date    time.Time   "date"
 	Host    string      "host"
 	Method  string      "method"
 	Path    string      "path"
@@ -91,7 +92,7 @@ func main() {
 			  fmt.Println("Path:", req.URL.Path)
 			  fmt.Println("Host:", req.Host)
 			  fmt.Println("Method:", req.Method)*/
-			err := c.Find(bson.M{"request.host": req.Host, "request.method": req.Method, "response.status": 200, "request.path": req.URL.Path}).Sort("-request.date").One(&result)
+			err := c.Find(bson.M{"request.host": req.Host, "request.method": req.Method, "response.status": 200, "request.path": req.URL.Path}).Sort("-date").One(&result)
 			if err == nil {
 				ctx.Logf("Found one")
 				/*fmt.Println("Path:", result.Request.Path)
