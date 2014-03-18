@@ -127,8 +127,10 @@ func main() {
 				ctx.Logf("Recording both request/response")
 				content := Content{
 					//Id: bson.NewObjectId(),
-					Request:  Request{Path: ctx.Resp.Request.URL.Path, Host: ctx.Resp.Request.Host, Method: ctx.Resp.Request.Method, Date: time.Now(), Time: float32(ctx.UserData.(ContextUserData).Time) / 1.0e9, Headers: ctx.Resp.Request.Header},
-					Response: Response{Status: ctx.Resp.StatusCode, Headers: ctx.Resp.Header, Body: s}}
+					Request:  Request{Path: ctx.Resp.Request.URL.Path, Host: ctx.Resp.Request.Host, Method: ctx.Resp.Request.Method, Time: float32(time.Now().UnixNano() - ctx.UserData.(ContextUserData).Time) / 1.0e9, Headers: ctx.Resp.Request.Header},
+					Response: Response{Status: ctx.Resp.StatusCode, Headers: ctx.Resp.Header, Body: s},
+                    Date: time.Now(), 
+                    }
 
 				err := c.Insert(content)
 				if err != nil {
