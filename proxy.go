@@ -37,6 +37,7 @@ type Content struct {
 type Request struct {
 	Body   string "body"
 	FileId bson.ObjectId
+	Query  string "query"
 	//Date    time.Time   "date"
 	Host    string      "host"
 	Method  string      "method"
@@ -196,7 +197,7 @@ func main() {
 			//log.Printf("Resp Contenttype %s", respctype)
 
 			respid := bson.NewObjectId()
-			log.Printf("Resp id: %s, host: %s", respid.Hex(), ctx.Resp.Request.Host)
+			//log.Printf("Resp id: %s, host: %s", respid.Hex(), ctx.Resp.Request.Host)
 
 			filename := filepath.Join(tmpdir, respid.Hex())
 
@@ -223,6 +224,7 @@ func main() {
 				//Id: docid,
 				Request: Request{
 					Path:    ctx.Resp.Request.URL.Path,
+					Query:   ctx.Resp.Request.URL.Query().Encode(),
 					FileId:  reqid,
 					Host:    ctx.Resp.Request.Host,
 					Method:  ctx.Resp.Request.Method,
