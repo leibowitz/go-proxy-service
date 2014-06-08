@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -71,6 +72,20 @@ func main() {
 	addr := flag.String("l", ":8080", "on which address should the proxy listen")
 
 	flag.Parse()
+
+	tmpdir := filepath.Join(os.TempDir(), "proxy-service")
+
+	if _, err := os.Stat(tmpdir); err != nil {
+		if os.IsNotExist(err) {
+			// Create temp directory to store body response
+			err = os.MkdirAll(tmpdir, 0777)
+		}
+
+		// err should be nil if we just created the directory
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	db := new(mgo.Database)
 	c := new(mgo.Collection)
@@ -181,8 +196,12 @@ func main() {
 			//log.Printf("Resp Contenttype %s", respctype)
 
 			respid := bson.NewObjectId()
+			log.Printf("Resp id: %s, host: %s", respid.Hex(), ctx.Resp.Request.Host)
+
+			filename := filepath.Join(tmpdir, respid.Hex())
+
 			//log.Printf("Duplicating Body file id: %s", respid.String())
-			resp.Body = NewTeeReadCloser(resp.Body, NewFileStream(respid.Hex(), *db, respctype, respid))
+			resp.Body = NewTeeReadCloser(resp.Body, NewFileStream(filename, *db, respctype, respid))
 
 			reqctype := getContentType(ctx.Resp.Request.Header.Get("Content-Type"))
 
@@ -278,11 +297,11 @@ func (fs *FileStream) Write(b []byte) (nr int, err error) {
 }
 
 func (fs *FileStream) Close() error {
-	fs.f.Seek(0, 0)
-	saveFileToMongo(fs.db, fs.objectId, fs.contentType, fs.f, fs.objectId.Hex())
 	if fs.f == nil {
 		return errors.New("FileStream was never written into")
 	}
+	fs.f.Seek(0, 0)
+	saveFileToMongo(fs.db, fs.objectId, fs.contentType, fs.f, fs.objectId.Hex())
 	err := fs.f.Close()
 	if err == nil {
 		err2 := os.Remove(fs.path)
