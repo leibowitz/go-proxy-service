@@ -35,6 +35,7 @@ type Content struct {
 }
 
 type Request struct {
+	Origin	string "origin"
 	Body   string "body"
 	FileId bson.ObjectId
 	Query  string "query"
@@ -223,6 +224,7 @@ func main() {
 			content := Content{
 				//Id: docid,
 				Request: Request{
+					Origin:	 ipAddrFromRemoteAddr(ctx.Resp.Request.RemoteAddr),
 					Path:    ctx.Resp.Request.URL.Path,
 					Query:   ctx.Resp.Request.URL.Query().Encode(),
 					FileId:  reqid,
@@ -334,4 +336,11 @@ func saveFileToMongo(db mgo.Database, objId bson.ObjectId, contentType string, o
 func getContentType(s string) string {
 	arr := strings.Split(s, ";")
 	return arr[0]
+}
+func ipAddrFromRemoteAddr(s string) string {
+        idx := strings.LastIndex(s, ":")
+        if idx == -1 {
+                return s
+        }
+        return s[:idx]
 }
