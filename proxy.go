@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/leibowitz/goproxy"
+	"github.com/twinj/uuid"
 )
 
 type ContextUserData struct {
@@ -35,6 +36,7 @@ type Content struct {
 	Request  Request   "request"
 	Response Response  "response"
 	Date     time.Time "date"
+	SocketUUID uuid.UUID "uuid"
 }
 
 type Rule struct {
@@ -128,6 +130,7 @@ func main() {
 		rules = db.C("log_rules")
 	}
 
+	uuid.SwitchFormat(uuid.CleanHyphen, false)
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = *verbose
 
@@ -285,6 +288,7 @@ b := bson.M{"$and": []bson.M{
 					Status:  ctx.Resp.StatusCode,
 					Headers: ctx.Resp.Header,
 					FileId:  respid},
+				SocketUUID: ctx.Uuid,
 				Date: time.Now(),
 			}
 
