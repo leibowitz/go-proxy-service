@@ -2,10 +2,12 @@ package main
 
 import (
 	"flag"
+	"strconv"
 	"labix.org/v2/mgo"
 	"labix.org/v2/mgo/bson"
 	"log"
 	"net/http"
+	"fmt"
 	//"regexp"
 	"bytes"
 	"errors"
@@ -22,9 +24,10 @@ import (
 type ContextUserData struct {
 	Store bool
 	Time  int64
-	//Body   io.Reader
-	Body   []byte
+	Body   io.Reader
+	//Body   []byte
 	Header http.Header
+	Origin string
 }
 
 type Content struct {
@@ -33,6 +36,24 @@ type Content struct {
 	Response Response  "response"
 	Date     time.Time "date"
 }
+
+type Rule struct {
+	//Id       bson.ObjectId
+	Active	bool "active"
+	Dynamic bool "dynamic"
+	Host	string "host"
+	Path	string "path"
+	Query	string "query"
+	Method	string "method"
+	Status	string "status"
+	Response string "response"
+	Body	string "body"
+	ReqBody string "reqbody"
+	ReqHeader http.Header "reqheaders"
+	RespHeader http.Header "respheaders"
+	Origin  string "origin"
+}
+
 
 type Request struct {
 	Origin	string "origin"
@@ -54,16 +75,14 @@ type Response struct {
 	Status  int         "status"
 }
 
-func NewResponse(r *http.Request, contentType string, status int, body []byte) *http.Response {
+func NewResponse(r *http.Request, headers http.Header, status int, body io.ReadCloser) *http.Response {
 	resp := &http.Response{}
 	resp.Request = r
 	resp.TransferEncoding = r.TransferEncoding
-	resp.Header = make(http.Header)
-	resp.Header.Add("Content-Type", contentType)
+	resp.Header = headers
 	resp.StatusCode = status
-	buf := bytes.NewBuffer(body)
-	resp.ContentLength = int64(buf.Len())
-	resp.Body = ioutil.NopCloser(buf)
+	//resp.ContentLength = int64(buf.Len())
+	resp.Body = body
 	return resp
 }
 
@@ -91,6 +110,7 @@ func main() {
 
 	db := new(mgo.Database)
 	c := new(mgo.Collection)
+	rules := new(mgo.Collection)
 
 	if len(*mongourl) != 0 {
 		// Mongo DB connection
@@ -105,6 +125,7 @@ func main() {
 
 		db = session.DB("proxyservice")
 		c = db.C("log_logentry")
+		rules = db.C("log_rules")
 	}
 
 	proxy := goproxy.NewProxyHttpServer()
@@ -113,6 +134,7 @@ func main() {
 	proxy.OnRequest().HandleConnect(goproxy.AlwaysMitm)
 
 	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		origin := ipAddrFromRemoteAddr(ctx.Req.RemoteAddr)
 
 		//log.Printf("Request: %s %s %s", req.Method, req.Host, req.RequestURI)
 
@@ -145,33 +167,57 @@ func main() {
 
 		var reqbody []byte
 
-		if c.Database != nil && *mock && req.Method != "CONNECT" {
+		var bodyreader io.Reader
+		if rules.Database != nil && *mock && req.Method != "CONNECT" {
 			//reqbody := string(body[:])
 			//log.Printf("request body: %s", reqbody)
-			result := Content{}
+			rule := Rule{}
 			//ctx.Logf("Looking for existing request")
 			/*fmt.Println("RequestURI:", req.RequestURI)
 			  fmt.Println("Path:", req.URL.Path)
 			  fmt.Println("Host:", req.Host)
 			  fmt.Println("Method:", req.Method)*/
-			err := c.Find(bson.M{"request.host": req.Host, "request.method": req.Method, "response.status": 200, "request.path": req.URL.Path}).Sort("-date").One(&result)
+b := bson.M{"$and": []bson.M{
+	bson.M{"active": true},
+	bson.M{"dynamic": false},
+	bson.M{"origin":
+	    bson.M{"$in":
+		[]interface{}{origin, false},
+	    },
+	},
+	bson.M{"host":
+	    bson.M{"$in":
+		[]interface{}{req.Host, false},
+	    },
+	},
+	bson.M{"method":
+	    bson.M{"$in":
+		[]interface{}{req.Method, false},
+	    },
+	},
+	bson.M{"path":
+	    bson.M{"$in":
+		[]interface{}{req.URL.Path, false},
+	    },
+	},
+	bson.M{"query":
+	    bson.M{"$in":
+		[]interface{}{req.URL.Query().Encode(), false},
+	    },
+	},
+    }}
+
+			//b := bson.M{"active": true, "dynamic": false, "host": req.Host, "method": req.Method, "path": req.URL.Path, "query": req.URL.Query().Encode()}
+			err := rules.Find(b).One(&rule)//.Sort("priority")
+			//log.Printf("Query: %+v, Res: %+v", b, rule)
 			if err == nil {
-				//ctx.Logf("Found one")
-				/*fmt.Println("Path:", result.Request.Path)
-				  //fmt.Println("Body:", result.Request.Body)
-				  fmt.Println("Method:", result.Request.Method)
-				  fmt.Println("Host:", result.Request.Host)
-				  fmt.Println("Time:", result.Request.Time)
-				  fmt.Println("Date:", result.Request.Date)
-				  fmt.Println("Headers:", result.Request.Headers)
-
-				  //fmt.Println("Body:", result.Response.Body)
-				  fmt.Println("Status:", result.Response.Status)
-				  fmt.Println("Headers:", result.Response.Headers)*/
-
-				//resp := goproxy.NewResponse(req, result.Response.Headers.Get("Content-Type"), result.Response.Status, result.Response.Body)
-				//ctx.UserData = ContextUserData{Store: false, Time: 0}
-				//return req, resp
+			    status, err := strconv.Atoi(rule.Status)
+			    reqbody := ioutil.NopCloser(bytes.NewBufferString(rule.ReqBody))
+			    respbody := ioutil.NopCloser(bytes.NewBufferString(rule.Body))
+			    log.Printf("%+v", rule)
+			    resp := NewResponse(req, rule.RespHeader, status, respbody)
+			    ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: rule.RespHeader, Origin: origin}
+			    return req, resp
 			}
 
 			// read the whole body
@@ -183,9 +229,13 @@ func main() {
 			defer req.Body.Close()
 			req.Body = ioutil.NopCloser(bytes.NewBuffer(reqbody))
 
+			bodyreader = bytes.NewReader(reqbody)
+
+		} else {
+		    bodyreader = req.Body
 		}
 
-		ctx.UserData = ContextUserData{Store: true, Time: time.Now().UnixNano(), Body: reqbody, Header: req.Header}
+		ctx.UserData = ContextUserData{Store: true, Time: time.Now().UnixNano(), Body: bodyreader, Header: req.Header, Origin: origin}
 		return req, nil
 	})
 
@@ -214,17 +264,16 @@ func main() {
 				reqctype = "text/plain"
 			}
 
-			bodyreader := bytes.NewReader(ctx.UserData.(ContextUserData).Body)
-
 			reqid := bson.NewObjectId()
+			//log.Printf("Req id: %s, host: %s", reqid.Hex(), ctx.Resp.Request.Host)
 
-			saveFileToMongo(*db, reqid, reqctype, bodyreader, reqid.Hex())
+			saveFileToMongo(*db, reqid, reqctype, ctx.UserData.(ContextUserData).Body, reqid.Hex())
 
 			// prepare document
 			content := Content{
 				//Id: docid,
 				Request: Request{
-					Origin:	 ipAddrFromRemoteAddr(ctx.Resp.Request.RemoteAddr),
+					Origin:	 ctx.UserData.(ContextUserData).Origin,
 					Path:    ctx.Resp.Request.URL.Path,
 					Query:   ctx.Resp.Request.URL.Query().Encode(),
 					FileId:  reqid,
@@ -316,6 +365,19 @@ func (fs *FileStream) Close() error {
 	return err
 }
 
+func getMongoFileContent(db mgo.Database, objId bson.ObjectId) (file *mgo.GridFile, err error) {
+    file, err = db.GridFS("fs").OpenId(objId)
+
+    if err != nil {
+	return file, err
+	if err == mgo.ErrNotFound {
+	}
+    }
+    //defer file.Close()
+
+    return file, err
+}
+
 // Store file in MongoDB GridFS
 func saveFileToMongo(db mgo.Database, objId bson.ObjectId, contentType string, openFile io.Reader, fileName string) {
 	mdbfile, err := db.GridFS("fs").Create(fileName)
@@ -324,7 +386,7 @@ func saveFileToMongo(db mgo.Database, objId bson.ObjectId, contentType string, o
 		mdbfile.SetId(objId)
 		_, err = io.Copy(mdbfile, openFile)
 		if err != nil {
-			log.Printf("Unable to copy to mongo")
+			log.Printf("Unable to copy to mongo: %s - %v", fileName, err)
 		}
 		err = mdbfile.Close()
 		if err != nil {
