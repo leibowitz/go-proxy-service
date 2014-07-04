@@ -256,7 +256,7 @@ b := bson.M{"$and": []bson.M{
 			filename := filepath.Join(tmpdir, respid.Hex())
 
 			//log.Printf("Duplicating Body file id: %s", respid.String())
-			resp.Body = NewTeeReadCloser(resp.Body, NewFileStream(filename, *db, respctype, respid))
+			resp.Body = NewTeeReadCloser(resp.Body, NewFileStream(filename, *db, respctype, respid, ctx))
 
 			reqctype := getContentType(ctx.Resp.Request.Header.Get("Content-Type"))
 
@@ -270,7 +270,7 @@ b := bson.M{"$and": []bson.M{
 			reqid := bson.NewObjectId()
 			//log.Printf("Req id: %s, host: %s", reqid.Hex(), ctx.Resp.Request.Host)
 
-			saveFileToMongo(*db, reqid, reqctype, ctx.UserData.(ContextUserData).Body, reqid.Hex())
+			saveFileToMongo(*db, reqid, reqctype, ctx.UserData.(ContextUserData).Body, reqid.Hex(), ctx)
 
 			// prepare document
 			content := Content{
@@ -337,10 +337,11 @@ type FileStream struct {
 	contentType string
 	objectId    bson.ObjectId
 	f           *os.File
+	ctx	    *goproxy.ProxyCtx
 }
 
-func NewFileStream(path string, db mgo.Database, contentType string, objectId bson.ObjectId) *FileStream {
-	return &FileStream{path: path, db: db, contentType: contentType, objectId: objectId, f: nil}
+func NewFileStream(path string, db mgo.Database, contentType string, objectId bson.ObjectId, ctx *goproxy.ProxyCtx) *FileStream {
+    return &FileStream{path: path, db: db, contentType: contentType, objectId: objectId, f: nil, ctx: ctx}
 }
 
 func (fs *FileStream) Write(b []byte) (nr int, err error) {
@@ -358,12 +359,12 @@ func (fs *FileStream) Close() error {
 		return errors.New("FileStream was never written into")
 	}
 	fs.f.Seek(0, 0)
-	saveFileToMongo(fs.db, fs.objectId, fs.contentType, fs.f, fs.objectId.Hex())
+	saveFileToMongo(fs.db, fs.objectId, fs.contentType, fs.f, fs.objectId.Hex(), fs.ctx)
 	err := fs.f.Close()
 	if err == nil {
 		err2 := os.Remove(fs.path)
 		if err2 != nil {
-			log.Printf("Unable to delete file")
+			fs.ctx.Logf("Unable to delete file")
 		}
 	}
 	return err
@@ -383,19 +384,20 @@ func getMongoFileContent(db mgo.Database, objId bson.ObjectId) (file *mgo.GridFi
 }
 
 // Store file in MongoDB GridFS
-func saveFileToMongo(db mgo.Database, objId bson.ObjectId, contentType string, openFile io.Reader, fileName string) {
+func saveFileToMongo(db mgo.Database, objId bson.ObjectId, contentType string, openFile io.Reader, fileName string, ctx *goproxy.ProxyCtx) {
 	mdbfile, err := db.GridFS("fs").Create(fileName)
 	if err == nil {
 		mdbfile.SetContentType(contentType)
 		mdbfile.SetId(objId)
 		_, err = io.Copy(mdbfile, openFile)
 		if err != nil {
-			log.Printf("Unable to copy to mongo: %s - %v", fileName, err)
+			ctx.Logf("Unable to copy to mongo: %s - %v", fileName, err)
 		}
 		err = mdbfile.Close()
 		if err != nil {
-			log.Printf("Unable to close copy to mongo")
+			ctx.Logf("Unable to close copy to mongo")
 		}
+		ctx.Logf("MongoDB body file saved")
 	}
 }
 
