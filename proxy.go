@@ -2,12 +2,12 @@ package main
 
 import (
 	"flag"
-	"strconv"
 	"labix.org/v2/mgo"
 	"labix.org/v2/mgo/bson"
 	"log"
 	"net/http"
-	"fmt"
+	"strconv"
+	//"fmt"
 	//"regexp"
 	"bytes"
 	"errors"
@@ -25,7 +25,7 @@ import (
 type ContextUserData struct {
 	Store bool
 	Time  int64
-	Body   io.Reader
+	Body  io.Reader
 	//Body   []byte
 	Header http.Header
 	Origin string
@@ -33,32 +33,31 @@ type ContextUserData struct {
 
 type Content struct {
 	//Id       bson.ObjectId
-	Request  Request   "request"
-	Response Response  "response"
-	Date     time.Time "date"
+	Request    Request   "request"
+	Response   Response  "response"
+	Date       time.Time "date"
 	SocketUUID uuid.UUID "uuid"
 }
 
 type Rule struct {
 	//Id       bson.ObjectId
-	Active	bool "active"
-	Dynamic bool "dynamic"
-	Host	string "host"
-	Path	string "path"
-	Query	string "query"
-	Method	string "method"
-	Status	string "status"
-	Response string "response"
-	Body	string "body"
-	ReqBody string "reqbody"
-	ReqHeader http.Header "reqheaders"
+	Active     bool        "active"
+	Dynamic    bool        "dynamic"
+	Host       string      "host"
+	Path       string      "path"
+	Query      string      "query"
+	Method     string      "method"
+	Status     string      "status"
+	Response   string      "response"
+	Body       string      "body"
+	ReqBody    string      "reqbody"
+	ReqHeader  http.Header "reqheaders"
 	RespHeader http.Header "respheaders"
-	Origin  string "origin"
+	Origin     string      "origin"
 }
 
-
 type Request struct {
-	Origin	string "origin"
+	Origin string "origin"
 	Body   string "body"
 	FileId bson.ObjectId
 	Query  string "query"
@@ -180,47 +179,86 @@ func main() {
 			  fmt.Println("Path:", req.URL.Path)
 			  fmt.Println("Host:", req.Host)
 			  fmt.Println("Method:", req.Method)*/
-b := bson.M{"$and": []bson.M{
-	bson.M{"active": true},
-	bson.M{"dynamic": false},
-	bson.M{"origin":
-	    bson.M{"$in":
-		[]interface{}{origin, false},
-	    },
-	},
-	bson.M{"host":
-	    bson.M{"$in":
-		[]interface{}{req.Host, false},
-	    },
-	},
-	bson.M{"method":
-	    bson.M{"$in":
-		[]interface{}{req.Method, false},
-	    },
-	},
-	bson.M{"path":
-	    bson.M{"$in":
-		[]interface{}{req.URL.Path, false},
-	    },
-	},
-	bson.M{"query":
-	    bson.M{"$in":
-		[]interface{}{req.URL.Query().Encode(), false},
-	    },
-	},
-    }}
+			b := bson.M{"$and": []bson.M{
+				bson.M{"active": true},
+				//bson.M{"dynamic": false},
+				bson.M{"origin": bson.M{"$in": []interface{}{origin, false},
+				},
+				},
+				bson.M{"host": bson.M{"$in": []interface{}{req.Host, false},
+				},
+				},
+				bson.M{"method": bson.M{"$in": []interface{}{req.Method, false},
+				},
+				},
+				bson.M{"path": bson.M{"$in": []interface{}{req.URL.Path, false},
+				},
+				},
+				bson.M{"query": bson.M{"$in": []interface{}{req.URL.Query().Encode(), false},
+				},
+				},
+			}}
 
 			//b := bson.M{"active": true, "dynamic": false, "host": req.Host, "method": req.Method, "path": req.URL.Path, "query": req.URL.Query().Encode()}
-			err := rules.Find(b).One(&rule)//.Sort("priority")
+			ctx.Logf("Looking for a rule: %+v", b)
+			err := rules.Find(b).Sort("dynamic").One(&rule)
 			//log.Printf("Query: %+v, Res: %+v", b, rule)
 			if err == nil {
-			    status, err := strconv.Atoi(rule.Status)
-			    reqbody := ioutil.NopCloser(bytes.NewBufferString(rule.ReqBody))
-			    respbody := ioutil.NopCloser(bytes.NewBufferString(rule.Body))
-			    log.Printf("%+v", rule)
-			    resp := NewResponse(req, rule.RespHeader, status, respbody)
-			    ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: rule.RespHeader, Origin: origin}
-			    return req, resp
+				ctx.Logf("Found rule: %+v", rule)
+				status, err := strconv.Atoi(rule.Status)
+				if rule.Dynamic {
+					result := Content{}
+					err = c.Find(bson.M{"request.host": req.Host, "request.method": req.Method, "response.status": status, "request.path": req.URL.Path}).Sort("-date").One(&result)
+					ctx.Logf("Found a dynamic rule matching, returning it: %+v", result)
+
+					//reqfile, _ := getMongoFileContent(ctx, *db, result.Request.FileId)
+					respfile, err := getMongoFileContent(ctx, *db, result.Response.FileId)
+					if respfile != nil && err == nil {
+						//reqbody := ioutil.NopCloser(bytes.NewBufferString(rule.ReqBody))
+						//respbody := ioutil.NopCloser(bytes.NewBufferString(rule.Body))
+						ctx.Logf("Header: %+v", result.Response.Headers)
+
+						resp := NewResponse(req, result.Response.Headers, status, respfile)
+						ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: result.Response.Headers, Origin: origin}
+						return req, resp
+					}
+				} else {
+					reqbody := ioutil.NopCloser(bytes.NewBufferString(rule.ReqBody))
+					respbody := ioutil.NopCloser(bytes.NewBufferString(rule.Body))
+					ctx.Logf("Found a static rule matching, returning it: %+v", rule)
+					resp := NewResponse(req, rule.RespHeader, status, respbody)
+					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: rule.RespHeader, Origin: origin}
+					return req, resp
+				}
+				/*result := Content{}
+				  err = c.Find(bson.M{"_id": bson.ObjectIdHex(rule.Response)}).One(&result)*/
+				//err := c.Find(bson.M{"request.host": req.Host, "request.method": req.Method, "response.status": 200, "request.path": req.URL.Path}).Sort("-date").One(&result)
+				if err == nil {
+					//log.Printf("Found %+v", result)
+					//respbody := result.Response.Body
+					/*file, err := getMongoFileContent(*db, result.Response.FileId)
+					    if err == nil {
+						resp := NewResponse(req, result.Response.Headers.Get("Content-Type"), result.Response.Status, file)
+						ctx.UserData = ContextUserData{Store: false, Time: 0, Header: result.Request.Headers, Origin: origin}
+						return req, resp
+					    }*/
+					//ctx.Logf("Found one")
+					/*fmt.Println("Path:", result.Request.Path)
+					  //fmt.Println("Body:", result.Request.Body)
+					  fmt.Println("Method:", result.Request.Method)
+					  fmt.Println("Host:", result.Request.Host)
+					  fmt.Println("Time:", result.Request.Time)
+					  fmt.Println("Date:", result.Request.Date)
+					  fmt.Println("Headers:", result.Request.Headers)
+
+					  //fmt.Println("Body:", result.Response.Body)
+					  fmt.Println("Status:", result.Response.Status)
+					  fmt.Println("Headers:", result.Response.Headers)*/
+
+					//resp := goproxy.NewResponse(req, result.Response.Headers.Get("Content-Type"), result.Response.Status, result.Response.Body)
+					//ctx.UserData = ContextUserData{Store: false, Time: 0}
+					//return req, resp
+				}
 			}
 
 			// read the whole body
@@ -235,7 +273,7 @@ b := bson.M{"$and": []bson.M{
 			bodyreader = bytes.NewReader(reqbody)
 
 		} else {
-		    bodyreader = req.Body
+			bodyreader = req.Body
 		}
 
 		ctx.UserData = ContextUserData{Store: true, Time: time.Now().UnixNano(), Body: bodyreader, Header: req.Header, Origin: origin}
@@ -256,7 +294,7 @@ b := bson.M{"$and": []bson.M{
 			filename := filepath.Join(tmpdir, respid.Hex())
 
 			//log.Printf("Duplicating Body file id: %s", respid.String())
-			resp.Body = NewTeeReadCloser(resp.Body, NewFileStream(filename, *db, respctype, respid, ctx))
+			fs := NewFileStream(filename, *db, respctype, respid, ctx)
 
 			reqctype := getContentType(ctx.Resp.Request.Header.Get("Content-Type"))
 
@@ -276,7 +314,7 @@ b := bson.M{"$and": []bson.M{
 			content := Content{
 				//Id: docid,
 				Request: Request{
-					Origin:	 ctx.UserData.(ContextUserData).Origin,
+					Origin:  ctx.UserData.(ContextUserData).Origin,
 					Path:    ctx.Resp.Request.URL.Path,
 					Query:   ctx.Resp.Request.URL.Query().Encode(),
 					FileId:  reqid,
@@ -289,19 +327,23 @@ b := bson.M{"$and": []bson.M{
 					Headers: ctx.Resp.Header,
 					FileId:  respid},
 				SocketUUID: ctx.Uuid,
-				Date: time.Now(),
+				Date:       time.Now(),
 			}
 
 			err := c.Insert(content)
 			if err != nil {
-				ctx.Logf("Can't insert document: %v\n", err)
+				ctx.Logf("Can't insert document: %v", err)
+			} else {
+				ctx.Logf("MongoDB document saved: %+v", content)
 			}
 
+			resp.Body = NewTeeReadCloser(resp.Body, fs)
 		}
 		return resp
 	})
 
 	log.Println("Starting Proxy")
+
 	log.Fatalln(http.ListenAndServe(*addr, proxy))
 }
 
@@ -337,11 +379,15 @@ type FileStream struct {
 	contentType string
 	objectId    bson.ObjectId
 	f           *os.File
-	ctx	    *goproxy.ProxyCtx
+	ctx         *goproxy.ProxyCtx
 }
 
 func NewFileStream(path string, db mgo.Database, contentType string, objectId bson.ObjectId, ctx *goproxy.ProxyCtx) *FileStream {
-    return &FileStream{path: path, db: db, contentType: contentType, objectId: objectId, f: nil, ctx: ctx}
+	f, err := os.Create(path)
+	if err != nil {
+		panic(err)
+	}
+	return &FileStream{path: path, db: db, contentType: contentType, objectId: objectId, f: f, ctx: ctx}
 }
 
 func (fs *FileStream) Write(b []byte) (nr int, err error) {
@@ -370,29 +416,33 @@ func (fs *FileStream) Close() error {
 	return err
 }
 
-func getMongoFileContent(db mgo.Database, objId bson.ObjectId) (file *mgo.GridFile, err error) {
-    file, err = db.GridFS("fs").OpenId(objId)
+func getMongoFileContent(ctx *goproxy.ProxyCtx, db mgo.Database, objId bson.ObjectId) (file *mgo.GridFile, err error) {
+	ctx.Logf("db: %+v", db)
+	file, err = db.GridFS("fs").OpenId(objId)
 
-    if err != nil {
-	return file, err
-	if err == mgo.ErrNotFound {
+	if err != nil {
+		return file, err
+		if err == mgo.ErrNotFound {
+		}
 	}
-    }
-    //defer file.Close()
+	//defer file.Close()
 
-    return file, err
+	return file, err
 }
 
 // Store file in MongoDB GridFS
 func saveFileToMongo(db mgo.Database, objId bson.ObjectId, contentType string, openFile io.Reader, fileName string, ctx *goproxy.ProxyCtx) {
+	ctx.Logf("db: %+v", db)
 	mdbfile, err := db.GridFS("fs").Create(fileName)
 	if err == nil {
 		mdbfile.SetContentType(contentType)
 		mdbfile.SetId(objId)
+		ctx.Logf("Copying to: %s", fileName)
 		_, err = io.Copy(mdbfile, openFile)
 		if err != nil {
 			ctx.Logf("Unable to copy to mongo: %s - %v", fileName, err)
 		}
+		ctx.Logf("Done copying, closing")
 		err = mdbfile.Close()
 		if err != nil {
 			ctx.Logf("Unable to close copy to mongo")
@@ -406,9 +456,9 @@ func getContentType(s string) string {
 	return arr[0]
 }
 func ipAddrFromRemoteAddr(s string) string {
-        idx := strings.LastIndex(s, ":")
-        if idx == -1 {
-                return s
-        }
-        return s[:idx]
+	idx := strings.LastIndex(s, ":")
+	if idx == -1 {
+		return s
+	}
+	return s[:idx]
 }
