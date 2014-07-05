@@ -39,6 +39,13 @@ type Content struct {
 	SocketUUID uuid.UUID "uuid"
 }
 
+type Rewrite struct {
+	Host      string "host"
+	DHost     string "dhost"
+	Protocol  string "protocol"
+	DProtocol string "dprotocol"
+}
+
 type Rule struct {
 	//Id       bson.ObjectId
 	Active     bool        "active"
@@ -111,6 +118,7 @@ func main() {
 
 	db := new(mgo.Database)
 	c := new(mgo.Collection)
+	h := new(mgo.Collection)
 	rules := new(mgo.Collection)
 
 	if len(*mongourl) != 0 {
@@ -126,6 +134,7 @@ func main() {
 
 		db = session.DB("proxyservice")
 		c = db.C("log_logentry")
+		h = db.C("log_hostrewrite")
 		rules = db.C("log_rules")
 	}
 
@@ -137,10 +146,31 @@ func main() {
 
 	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		origin := ipAddrFromRemoteAddr(ctx.Req.RemoteAddr)
+		ctx.Logf("Origin: %s", origin)
+		/*ctx.RoundTripper = goproxy.RoundTripperFunc(func (req *http.Request, ctx *goproxy.ProxyCtx) (resp *http.Response, err error) {
+			//data := transport.RoundTripDetails{}
+			data, resp, err := tr.DetailedRoundTrip(req)
+			//log.Printf("%+v", data)
+			return
+		})*/
+
+		rewrite := Rewrite{}
+		err := h.Find(bson.M{"host": req.Host}).One(&rewrite)
+		if err == nil {
+			req.URL.Scheme = rewrite.DProtocol
+			req.URL.Host = rewrite.DHost
+			req.Host = rewrite.DHost
+			ctx.Logf("Rewrite: %+v, URL: %+v", rewrite, req.URL)
+		}
+
+		//log.Printf("%+v", getHost(req.RemoteAddr))
+		/*if ctx.UserData != nil {
+			from = ctx.UserData.(*transport.RoundTripDetails).TCPAddr.String()
+		}*/
 
 		//log.Printf("Request: %s %s %s", req.Method, req.Host, req.RequestURI)
 
-		host := req.Host
+		//host := req.Host
 		// Request to domain--name-co-uk.mocky.dev
 		// will be forwarded to domain-name.co.uk
 		/*if strings.Contains(host, ".mocky.dev") {
@@ -163,7 +193,7 @@ func main() {
 		}*/
 
 		//log.Printf("Target Host: %s - Headers: %+v", host, req.Header)
-		req.Host = host
+		//req.Host = host
 
 		//log.Printf("%+v", req)
 
@@ -182,20 +212,15 @@ func main() {
 			b := bson.M{"$and": []bson.M{
 				bson.M{"active": true},
 				//bson.M{"dynamic": false},
-				bson.M{"origin": bson.M{"$in": []interface{}{origin, false},
+				bson.M{"origin": bson.M{"$in": []interface{}{origin, false}},
 				},
+				bson.M{"host": bson.M{"$in": []interface{}{req.Host, false}},
 				},
-				bson.M{"host": bson.M{"$in": []interface{}{req.Host, false},
+				bson.M{"method": bson.M{"$in": []interface{}{req.Method, false}},
 				},
+				bson.M{"path": bson.M{"$in": []interface{}{req.URL.Path, false}},
 				},
-				bson.M{"method": bson.M{"$in": []interface{}{req.Method, false},
-				},
-				},
-				bson.M{"path": bson.M{"$in": []interface{}{req.URL.Path, false},
-				},
-				},
-				bson.M{"query": bson.M{"$in": []interface{}{req.URL.Query().Encode(), false},
-				},
+				bson.M{"query": bson.M{"$in": []interface{}{req.URL.Query().Encode(), false}},
 				},
 			}}
 
