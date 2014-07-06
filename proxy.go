@@ -61,6 +61,7 @@ type Rule struct {
 	ReqHeader  http.Header "reqheaders"
 	RespHeader http.Header "respheaders"
 	Origin     string      "origin"
+	Delay      int32       "delay"
 }
 
 type Request struct {
@@ -265,6 +266,7 @@ func main() {
 					respbody := ioutil.NopCloser(bytes.NewBufferString(rule.Body))
 					ctx.Logf("Found a static rule matching, returning it: %+v", rule)
 					resp := NewResponse(req, rule.RespHeader, status, respbody)
+					ctx.Delay = rule.Delay
 					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: rule.RespHeader, Origin: origin}
 					return req, resp
 				}
