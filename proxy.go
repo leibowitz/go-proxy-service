@@ -155,7 +155,7 @@ func main() {
 		})*/
 
 		rewrite := Rewrite{}
-		err := h.Find(bson.M{"host": req.Host}).One(&rewrite)
+        err := h.Find(bson.M{"host": req.Host, "active": true}).One(&rewrite)
 		if err == nil {
 			req.URL.Scheme = rewrite.DProtocol
 			req.URL.Host = rewrite.DHost
