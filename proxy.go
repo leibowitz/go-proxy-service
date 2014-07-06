@@ -36,7 +36,7 @@ type Content struct {
 	Request    Request   "request"
 	Response   Response  "response"
 	Date       time.Time "date"
-	SocketUUID uuid.UUID "uuid"
+	SocketUUID []byte "uuid"
 }
 
 type Rewrite struct {
@@ -351,7 +351,7 @@ func main() {
 					Status:  ctx.Resp.StatusCode,
 					Headers: ctx.Resp.Header,
 					FileId:  respid},
-				SocketUUID: ctx.Uuid,
+				SocketUUID: ctx.Uuid.Bytes(),
 				Date:       time.Now(),
 			}
 
