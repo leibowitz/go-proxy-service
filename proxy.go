@@ -233,19 +233,37 @@ func main() {
 				status, err := strconv.Atoi(rule.Status)
 				if rule.Dynamic {
 					result := Content{}
-					err = c.Find(bson.M{"request.host": req.Host, "request.method": req.Method, "response.status": status, "request.path": req.URL.Path}).Sort("-date").One(&result)
-					ctx.Logf("Found a dynamic rule matching, returning it: %+v", result)
+					reqQuery := bson.M{"$and": []bson.M{
+						/*bson.M{"origin": bson.M{"$in": []interface{}{origin, false}},
+						},*/
+						bson.M{"request.host": bson.M{"$in": []interface{}{req.Host}}},
+						bson.M{"request.method": bson.M{"$in": []interface{}{req.Method}}},
+						bson.M{"request.path": bson.M{"$in": []interface{}{req.URL.Path}}},
+						bson.M{"response.status": bson.M{"$in": []interface{}{status}}},
+						/*bson.M{"query": bson.M{"$in": []interface{}{req.URL.Query().Encode()}},
+						},*/
+					}}
+					ctx.Logf("Query %+v", reqQuery)
+					//reqQuery := bson.M{"request.host": rule.Host, "request.method": rule.Method, "response.status": status, "request.path": rule.Path}
+					err = c.Find(reqQuery).Sort("-date").One(&result)
+					if err == nil {
+						ctx.Logf("Found a dynamic rule matching, returning it: %+v", result)
+						respId := result.Response.FileId
+						//reqfile, _ := getMongoFileContent(ctx, *db, result.Request.FileId)
+						respfile, err := getMongoFileContent(ctx, *db, respId)
+						if respfile != nil && err == nil {
+							//reqbody := ioutil.NopCloser(bytes.NewBufferString(rule.ReqBody))
+							//respbody := ioutil.NopCloser(bytes.NewBufferString(rule.Body))
+							ctx.Logf("Header: %+v", result.Response.Headers)
 
-					//reqfile, _ := getMongoFileContent(ctx, *db, result.Request.FileId)
-					respfile, err := getMongoFileContent(ctx, *db, result.Response.FileId)
-					if respfile != nil && err == nil {
-						//reqbody := ioutil.NopCloser(bytes.NewBufferString(rule.ReqBody))
-						//respbody := ioutil.NopCloser(bytes.NewBufferString(rule.Body))
-						ctx.Logf("Header: %+v", result.Response.Headers)
-
-						resp := NewResponse(req, result.Response.Headers, status, respfile)
-						ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: result.Response.Headers, Origin: origin}
-						return req, resp
+							resp := NewResponse(req, result.Response.Headers, status, respfile)
+							ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: result.Response.Headers, Origin: origin}
+							return req, resp
+						} else {
+							ctx.Logf("Couldn't retrieve the response body: %+v", err)
+						}
+					} else {
+						ctx.Logf("Couldn't find a dynamic response matching: %+v", err)
 					}
 				} else {
 					reqbody := ioutil.NopCloser(bytes.NewBufferString(rule.ReqBody))
