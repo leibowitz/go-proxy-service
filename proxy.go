@@ -36,7 +36,7 @@ type Content struct {
 	Request    Request   "request"
 	Response   Response  "response"
 	Date       time.Time "date"
-	SocketUUID []byte "uuid"
+	SocketUUID []byte    "uuid"
 }
 
 type Rewrite struct {
@@ -155,7 +155,7 @@ func main() {
 		})*/
 
 		rewrite := Rewrite{}
-        err := h.Find(bson.M{"host": req.Host, "active": true}).One(&rewrite)
+		err := h.Find(bson.M{"host": req.Host, "active": true}).One(&rewrite)
 		if err == nil {
 			req.URL.Scheme = rewrite.DProtocol
 			req.URL.Host = rewrite.DHost
@@ -212,16 +212,11 @@ func main() {
 			b := bson.M{"$and": []bson.M{
 				bson.M{"active": true},
 				//bson.M{"dynamic": false},
-				bson.M{"origin": bson.M{"$in": []interface{}{origin, false}},
-				},
-				bson.M{"host": bson.M{"$in": []interface{}{req.Host, false}},
-				},
-				bson.M{"method": bson.M{"$in": []interface{}{req.Method, false}},
-				},
-				bson.M{"path": bson.M{"$in": []interface{}{req.URL.Path, false}},
-				},
-				bson.M{"query": bson.M{"$in": []interface{}{req.URL.Query().Encode(), false}},
-				},
+				bson.M{"origin": bson.M{"$in": []interface{}{origin, false}}},
+				bson.M{"host": bson.M{"$in": []interface{}{req.Host, false}}},
+				bson.M{"method": bson.M{"$in": []interface{}{req.Method, false}}},
+				bson.M{"path": bson.M{"$in": []interface{}{req.URL.Path, false}}},
+				bson.M{"query": bson.M{"$in": []interface{}{req.URL.Query().Encode(), false}}},
 			}}
 
 			//b := bson.M{"active": true, "dynamic": false, "host": req.Host, "method": req.Method, "path": req.URL.Path, "query": req.URL.Query().Encode()}
