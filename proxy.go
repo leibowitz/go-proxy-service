@@ -71,6 +71,8 @@ type Request struct {
 	Query  string "query"
 	//Date    time.Time   "date"
 	Host    string      "host"
+	Scheme  string      "scheme"
+	Url     string      "url"
 	Method  string      "method"
 	Path    string      "path"
 	Time    float32     "time"
@@ -365,6 +367,8 @@ func main() {
 					Path:    ctx.Resp.Request.URL.Path,
 					Query:   ctx.Resp.Request.URL.Query().Encode(),
 					FileId:  reqid,
+					Url:     ctx.Resp.Request.URL.String(),
+					Scheme:  ctx.Resp.Request.URL.Scheme,
 					Host:    ctx.Resp.Request.Host,
 					Method:  ctx.Resp.Request.Method,
 					Time:    float32(time.Now().UnixNano()-ctx.UserData.(ContextUserData).Time) / 1.0e9,
