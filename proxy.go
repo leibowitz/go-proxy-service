@@ -262,7 +262,7 @@ func main() {
 							ctx.Logf("Header: %+v", result.Response.Headers)
 
 							resp := NewResponse(req, result.Response.Headers, status, respfile)
-							ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: result.Response.Headers, Origin: origin}
+							ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: req.Header, Origin: origin}
 							return req, resp
 						} else {
 							ctx.Logf("Couldn't retrieve the response body: %+v", err)
@@ -276,7 +276,7 @@ func main() {
 					ctx.Logf("Found a static rule matching, returning it: %+v", rule)
 					resp := NewResponse(req, rule.RespHeader, status, respbody)
 					ctx.Delay = rule.Delay
-					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: rule.RespHeader, Origin: origin}
+					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: req.Header, Origin: origin}
 					return req, resp
 				}
 				/*result := Content{}
