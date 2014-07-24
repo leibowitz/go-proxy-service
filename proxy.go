@@ -137,6 +137,11 @@ func main() {
 		c = db.C("log_logentry")
 		h = db.C("log_hostrewrite")
 		rules = db.C("log_rules")
+	} else {
+		db = nil
+		c = nil
+		h = nil
+		rules = nil
 	}
 
 	uuid.SwitchFormat(uuid.CleanHyphen, false)
@@ -156,12 +161,14 @@ func main() {
 		})*/
 
 		rewrite := Rewrite{}
-		err := h.Find(bson.M{"host": req.Host, "active": true}).One(&rewrite)
-		if err == nil {
-			req.URL.Scheme = rewrite.DProtocol
-			req.URL.Host = rewrite.DHost
-			req.Host = rewrite.DHost
-			ctx.Logf("Rewrite: %+v, URL: %+v", rewrite, req.URL)
+		if h != nil && h.Database != nil {
+			err := h.Find(bson.M{"host": req.Host, "active": true}).One(&rewrite)
+			if err == nil {
+				req.URL.Scheme = rewrite.DProtocol
+				req.URL.Host = rewrite.DHost
+				req.Host = rewrite.DHost
+				ctx.Logf("Rewrite: %+v, URL: %+v", rewrite, req.URL)
+			}
 		}
 
 		//log.Printf("%+v", getHost(req.RemoteAddr))
@@ -201,7 +208,7 @@ func main() {
 		var reqbody []byte
 
 		var bodyreader io.Reader
-		if rules.Database != nil && *mock && req.Method != "CONNECT" {
+		if rules != nil && rules.Database != nil && *mock && req.Method != "CONNECT" {
 			//reqbody := string(body[:])
 			//log.Printf("request body: %s", reqbody)
 			rule := Rule{}
@@ -227,7 +234,7 @@ func main() {
 			if err == nil {
 				ctx.Logf("Found rule: %+v", rule)
 				status, err := strconv.Atoi(rule.Status)
-				if rule.Dynamic {
+				if rule.Dynamic && c != nil && c.Database != nil {
 					result := Content{}
 					reqQuery := bson.M{"$and": []bson.M{
 						/*bson.M{"origin": bson.M{"$in": []interface{}{origin, false}},
@@ -242,7 +249,7 @@ func main() {
 					ctx.Logf("Query %+v", reqQuery)
 					//reqQuery := bson.M{"request.host": rule.Host, "request.method": rule.Method, "response.status": status, "request.path": rule.Path}
 					err = c.Find(reqQuery).Sort("-date").One(&result)
-					if err == nil {
+					if err == nil && db != nil {
 						ctx.Logf("Found a dynamic rule matching, returning it: %+v", result)
 						respId := result.Response.FileId
 						//reqfile, _ := getMongoFileContent(ctx, *db, result.Request.FileId)
@@ -322,7 +329,7 @@ func main() {
 
 	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		//ctx.Logf("Method: %s - host: %s", ctx.Resp.Request.Method, ctx.Resp.Request.Host)
-		if c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.Request.Method != "CONNECT" {
+		if c != nil && c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.Request.Method != "CONNECT" && db != nil {
 			// get response content type
 			respctype := getContentType(ctx.Resp.Header.Get("Content-Type"))
 
