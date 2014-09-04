@@ -332,6 +332,20 @@ func main() {
 	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		//ctx.Logf("Method: %s - host: %s", ctx.Resp.Request.Method, ctx.Resp.Request.Host)
 		if c != nil && c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.Request.Method != "CONNECT" && db != nil {
+			// check for valid methods
+			switch ctx.Resp.Request.Method {
+			case "GET":
+			case "POST":
+			case "PUT":
+			case "DELETE":
+			case "HEAD":
+			case "OPTIONS":
+			case "TRACE":
+
+			default:
+				log.Println("Unable to determine request method properly: %s", ctx.Resp.Request.Method)
+				return resp
+			}
 			// get response content type
 			respctype := getContentType(ctx.Resp.Header.Get("Content-Type"))
 
