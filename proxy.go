@@ -27,12 +27,13 @@ type ContextUserData struct {
 	Time  int64
 	Body  io.Reader
 	//Body   []byte
-	Header http.Header
-	Origin string
+	Header      http.Header
+	Origin      string
+	Collections []*mgo.Collection
 }
 
 type Content struct {
-	//Id       bson.ObjectId
+	Id         bson.ObjectId
 	Request    Request   "request"
 	Response   Response  "response"
 	Date       time.Time "date"
@@ -121,6 +122,7 @@ func main() {
 
 	db := new(mgo.Database)
 	c := new(mgo.Collection)
+	cache := new(mgo.Collection)
 	h := new(mgo.Collection)
 	rules := new(mgo.Collection)
 
@@ -136,12 +138,14 @@ func main() {
 		session.SetMode(mgo.Monotonic, true)
 
 		db = session.DB("proxyservice")
-		c = db.C("log_logentry")
+		c = db.C("log_logentry")     // capped collection
+		cache = db.C("log_logcache") // forever cache
 		h = db.C("log_hostrewrite")
 		rules = db.C("log_rules")
 	} else {
 		db = nil
 		c = nil
+		cache = nil
 		h = nil
 		rules = nil
 	}
@@ -207,6 +211,10 @@ func main() {
 
 		//log.Printf("%+v", req)
 
+		// Use the log_logentry for storing this request by default
+		collections := make([]*mgo.Collection, 0)
+		collections = append(collections, c)
+
 		var reqbody []byte
 
 		var bodyreader io.Reader
@@ -236,7 +244,14 @@ func main() {
 			if err == nil {
 				ctx.Logf("Found rule: %+v", rule)
 				status, err := strconv.Atoi(rule.Status)
-				if rule.Dynamic && c != nil && c.Database != nil {
+				var cachedb *mgo.Collection
+				if cache != nil && cache.Database != nil {
+					cachedb = cache // use the logcache collection (forever cache)
+				} else if c != nil && c.Database != nil {
+					cachedb = c // use the logentry collection (capped collection)
+				}
+
+				if rule.Dynamic && cachedb != nil && cachedb.Database != nil {
 					result := Content{}
 					reqQuery := bson.M{"$and": []bson.M{
 						/*bson.M{"origin": bson.M{"$in": []interface{}{origin, false}},
@@ -250,7 +265,7 @@ func main() {
 					}}
 					ctx.Logf("Query %+v", reqQuery)
 					//reqQuery := bson.M{"request.host": rule.Host, "request.method": rule.Method, "response.status": status, "request.path": rule.Path}
-					err = c.Find(reqQuery).Sort("-date").One(&result)
+					err = cachedb.Find(reqQuery).Sort("-date").One(&result)
 					if err == nil && db != nil {
 						ctx.Logf("Found a dynamic rule matching, returning it: %+v", result)
 						respId := result.Response.FileId
@@ -262,21 +277,23 @@ func main() {
 							ctx.Logf("Header: %+v", result.Response.Headers)
 
 							resp := NewResponse(req, result.Response.Headers, status, respfile)
-							ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: req.Header, Origin: origin}
+							ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: req.Header, Origin: origin, Collections: collections}
 							return req, resp
 						} else {
 							ctx.Logf("Couldn't retrieve the response body: %+v", err)
 						}
 					} else {
 						ctx.Logf("Couldn't find a dynamic response matching: %+v", err)
+						// We need to store this request for the future
+						collections = append(collections, cache)
 					}
 				} else {
+					ctx.Logf("Found a static rule matching, returning it: %+v", rule)
 					reqbody := ioutil.NopCloser(bytes.NewBufferString(rule.ReqBody))
 					respbody := ioutil.NopCloser(bytes.NewBufferString(rule.Body))
-					ctx.Logf("Found a static rule matching, returning it: %+v", rule)
 					resp := NewResponse(req, rule.RespHeader, status, respbody)
 					ctx.Delay = rule.Delay
-					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: req.Header, Origin: origin}
+					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: req.Header, Origin: origin, Collections: collections}
 					return req, resp
 				}
 				/*result := Content{}
@@ -325,13 +342,13 @@ func main() {
 			bodyreader = req.Body
 		}
 
-		ctx.UserData = ContextUserData{Store: true, Time: time.Now().UnixNano(), Body: bodyreader, Header: req.Header, Origin: origin}
+		ctx.UserData = ContextUserData{Store: true, Time: time.Now().UnixNano(), Body: bodyreader, Header: req.Header, Origin: origin, Collections: collections}
 		return req, nil
 	})
 
 	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		//ctx.Logf("Method: %s - host: %s", ctx.Resp.Request.Method, ctx.Resp.Request.Host)
-		if c != nil && c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.Request.Method != "CONNECT" && db != nil {
+		if c != nil && c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.Request.Method != "CONNECT" && db != nil && ctx.UserData.(ContextUserData).Collections != nil {
 			// get response content type
 			respctype := getContentType(ctx.Resp.Header.Get("Content-Type"))
 
@@ -381,11 +398,16 @@ func main() {
 				Date:       time.Now(),
 			}
 
-			err := c.Insert(content)
-			if err != nil {
-				ctx.Logf("Can't insert document: %v", err)
-			} else {
-				ctx.Logf("MongoDB document saved: %+v", content)
+			id := bson.NewObjectId()
+			content.Id = id
+			for _, collection := range ctx.UserData.(ContextUserData).Collections {
+				ctx.Logf("trying to insert with an id")
+				err := collection.Insert(content)
+				if err != nil {
+					ctx.Logf("Can't insert document into %s: %v", collection.Name, err)
+				} else {
+					ctx.Logf("MongoDB document saved to %s: %+v", collection.Name, content)
+				}
 			}
 
 			resp.Body = NewTeeReadCloser(resp.Body, fs)
