@@ -146,7 +146,7 @@ func main() {
 		rules = nil
 	}
 
-	uuid.SwitchFormat(uuid.CleanHyphen, false)
+	uuid.SwitchFormat(uuid.CleanHyphen)
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = *verbose
 
