@@ -401,7 +401,7 @@ func main() {
 				Date:       time.Now(),
 			}
 
-			err := c.Insert(content)
+			err = c.Insert(content)
 			if err != nil {
 				ctx.Logf("Can't insert document: %v", err)
 			} else {
