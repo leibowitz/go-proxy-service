@@ -230,7 +230,7 @@ func main() {
 			}}
 
 			//b := bson.M{"active": true, "dynamic": false, "host": req.Host, "method": req.Method, "path": req.URL.Path, "query": req.URL.Query().Encode()}
-			ctx.Logf("Looking for a rule: %+v", b)
+			ctx.Logf("Looking for a rule for %s", req.URL.Path)
 			err := rules.Find(b).Sort("dynamic").One(&rule)
 			//log.Printf("Query: %+v, Res: %+v", b, rule)
 			if err == nil {
@@ -273,7 +273,7 @@ func main() {
 				} else {
 					reqbody := ioutil.NopCloser(bytes.NewBufferString(rule.ReqBody))
 					respbody := ioutil.NopCloser(bytes.NewBufferString(rule.Body))
-					ctx.Logf("Found a static rule matching, returning it: %+v", rule)
+					ctx.Logf("Found a static rule matching, returning it: %+v", rule.Response)
 					resp := NewResponse(req, rule.RespHeader, status, respbody)
 					ctx.Delay = rule.Delay
 					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: req.Header, Origin: origin}
@@ -343,7 +343,10 @@ func main() {
 			filename := filepath.Join(tmpdir, respid.Hex())
 
 			//log.Printf("Duplicating Body file id: %s", respid.String())
-			fs := NewFileStream(filename, *db, respctype, respid, ctx)
+			fs, err := NewFileStream(filename, *db, respctype, respid, ctx)
+			if err != nil {
+				ctx.Logf("Unable to create file: %s", err.Error())
+			}
 
 			reqctype := getContentType(ctx.Resp.Request.Header.Get("Content-Type"))
 
@@ -388,12 +391,14 @@ func main() {
 				ctx.Logf("MongoDB document saved: %+v", content)
 			}
 
-			resp.Body = NewTeeReadCloser(resp.Body, fs)
+			if fs != nil {
+				resp.Body = NewTeeReadCloser(resp.Body, fs)
+			}
 		}
 		return resp
 	})
 
-	log.Println("Starting Proxy")
+	log.Printf("Starting Proxy %+v", *addr)
 
 	log.Fatalln(http.ListenAndServe(*addr, proxy))
 }
@@ -433,16 +438,18 @@ type FileStream struct {
 	ctx         *goproxy.ProxyCtx
 }
 
-func NewFileStream(path string, db mgo.Database, contentType string, objectId bson.ObjectId, ctx *goproxy.ProxyCtx) *FileStream {
+func NewFileStream(path string, db mgo.Database, contentType string, objectId bson.ObjectId, ctx *goproxy.ProxyCtx) (*FileStream, error) {
+	ctx.Logf("Creating file %s", objectId)
 	f, err := os.Create(path)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return &FileStream{path: path, db: db, contentType: contentType, objectId: objectId, f: f, ctx: ctx}
+	return &FileStream{path: path, db: db, contentType: contentType, objectId: objectId, f: f, ctx: ctx}, nil
 }
 
 func (fs *FileStream) Write(b []byte) (nr int, err error) {
 	if fs.f == nil {
+		fs.ctx.Logf("Trying to create again? %s", fs.objectId)
 		fs.f, err = os.Create(fs.path)
 		if err != nil {
 			return 0, err
@@ -452,6 +459,7 @@ func (fs *FileStream) Write(b []byte) (nr int, err error) {
 }
 
 func (fs *FileStream) Close() error {
+	fs.ctx.Logf("Closing file %s", fs.objectId)
 	if fs.f == nil {
 		return errors.New("FileStream was never written into")
 	}
@@ -459,10 +467,13 @@ func (fs *FileStream) Close() error {
 	saveFileToMongo(fs.db, fs.objectId, fs.contentType, fs.f, fs.objectId.Hex(), fs.ctx)
 	err := fs.f.Close()
 	if err == nil {
+		fs.ctx.Logf("File closed %s", fs.objectId)
 		err2 := os.Remove(fs.path)
 		if err2 != nil {
-			fs.ctx.Logf("Unable to delete file")
+			fs.ctx.Logf("Unable to delete file: %s", err2)
 		}
+	} else {
+		fs.ctx.Logf("Failed to close file %s %s", fs.objectId, err.Error())
 	}
 	return err
 }
@@ -492,13 +503,18 @@ func saveFileToMongo(db mgo.Database, objId bson.ObjectId, contentType string, o
 		_, err = io.Copy(mdbfile, openFile)
 		if err != nil {
 			ctx.Logf("Unable to copy to mongo: %s - %v", fileName, err)
+		} else {
+			ctx.Logf("Done copying")
 		}
-		ctx.Logf("Done copying, closing")
+		ctx.Logf("CLosing mdb file")
 		err = mdbfile.Close()
 		if err != nil {
-			ctx.Logf("Unable to close copy to mongo")
+			ctx.Logf("Unable to close copy to mongo: %s", err)
+		} else {
+			ctx.Logf("MongoDB file closed")
 		}
-		ctx.Logf("MongoDB body file saved")
+	} else {
+		ctx.Logf("Unable to create new GridFS file: %s", err)
 	}
 }
 
