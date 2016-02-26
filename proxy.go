@@ -362,6 +362,23 @@ func main() {
 
 			saveFileToMongo(*db, reqid, reqctype, ctx.UserData.(ContextUserData).Body, reqid.Hex(), ctx)
 
+			method := ctx.Resp.Request.Method
+			// Sanity check for appboy request from iOS Sdk sending incorrect requests
+			if len(method) > 10 {
+				ctx.Logf("Method is too long: %s", method)
+				valid := []string{"POST", "GET", "PATCH", "PUT", "DELETE", "OPTIONS", "TRACE", "HEAD", "CONNECT"}
+				for _, m := range valid {
+					if method[len(method)-len(m):len(method)] == m {
+						method = m
+						break
+					}
+				}
+
+				// Could not detect valid method, do not store this request
+				if method == ctx.Resp.Request.Method {
+					return resp
+				}
+			}
 			// prepare document
 			content := Content{
 				//Id: docid,
@@ -373,7 +390,7 @@ func main() {
 					Url:     ctx.Resp.Request.URL.String(),
 					Scheme:  ctx.Resp.Request.URL.Scheme,
 					Host:    ctx.Resp.Request.Host,
-					Method:  ctx.Resp.Request.Method,
+					Method:  method,
 					Time:    float32(time.Now().UnixNano()-ctx.UserData.(ContextUserData).Time) / 1.0e9,
 					Headers: ctx.UserData.(ContextUserData).Header},
 				Response: Response{
