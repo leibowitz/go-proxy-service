@@ -331,7 +331,7 @@ func main() {
 
 	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		//ctx.Logf("Method: %s - host: %s", ctx.Resp.Request.Method, ctx.Resp.Request.Host)
-		if c != nil && c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp.Request.Method != "CONNECT" && db != nil {
+		if c != nil && c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp != nil && ctx.Resp.Request != nil && ctx.Resp.Request.Method != "CONNECT" && db != nil {
 			// get response content type
 			respctype := getContentType(ctx.Resp.Header.Get("Content-Type"))
 
