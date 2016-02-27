@@ -100,8 +100,9 @@ func NewResponse(r *http.Request, headers http.Header, status int, body io.ReadC
 var IgnoreHosts map[string]IgnoreHost
 
 type IgnoreHost struct {
-	Host  string   "host"
-	Paths []string "paths"
+	Active bool     "active"
+	Host   string   "host"
+	Paths  []string "paths"
 }
 
 func Contains(hosts []string, host string) bool {
@@ -159,7 +160,7 @@ func main() {
 		ignores = db.C("log_ignores")
 		// load all ignore hosts
 		var result []IgnoreHost
-		err = ignores.Find(nil).Limit(100).All(&result)
+		err = ignores.Find(bson.M{"active": true}).Limit(100).All(&result)
 		if err != nil {
 			panic(err)
 		}
