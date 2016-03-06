@@ -160,6 +160,16 @@ func main() {
 
 		db = session.DB("proxyservice")
 		c = db.C("log_logentry")
+		// Make sure the log_logentry is created as a capped collection
+		ccinfo := mgo.CollectionInfo{
+			Capped: true,
+			MaxBytes: 5242880, // 5MB
+		}
+
+		if err := c.Create(&ccinfo); err != nil {
+			panic(err)
+		}
+
 		h = db.C("log_hostrewrite")
 		rules = db.C("log_rules")
 		ignores = db.C("log_ignores")
