@@ -144,7 +144,12 @@ func main() {
 
 	if len(*mongourl) != 0 {
 		// Mongo DB connection
-		session, err := mgo.Dial(*mongourl)
+		info, err := mgo.ParseURL(*mongourl)
+		if err != nil {
+			panic(err)
+		}
+		info.Mechanism = "SCRAM-SHA-1"
+		session, err := mgo.DialWithInfo(info)
 		if err != nil {
 			panic(err)
 		}
