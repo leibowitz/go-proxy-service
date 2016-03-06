@@ -162,12 +162,13 @@ func main() {
 		c = db.C("log_logentry")
 		// Make sure the log_logentry is created as a capped collection
 		ccinfo := mgo.CollectionInfo{
-			Capped: true,
+			Capped:   true,
 			MaxBytes: 5242880, // 5MB
 		}
 
+		// try creating the collection
 		if err := c.Create(&ccinfo); err != nil {
-			panic(err)
+			//panic(err)
 		}
 
 		h = db.C("log_hostrewrite")
