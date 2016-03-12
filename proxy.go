@@ -97,8 +97,6 @@ func NewResponse(r *http.Request, headers http.Header, status int, body io.ReadC
 	return resp
 }
 
-var IgnoreHosts map[string]IgnoreHost
-
 type IgnoreHost struct {
 	Active bool     "active"
 	Host   string   "host"
@@ -174,24 +172,13 @@ func main() {
 		h = db.C("log_hostrewrite")
 		rules = db.C("log_rules")
 		ignores = db.C("log_ignores")
-		// load all ignore hosts
-		var result []IgnoreHost
-		err = ignores.Find(bson.M{"active": true}).Limit(100).All(&result)
-		if err != nil {
-			panic(err)
-		}
 
-		IgnoreHosts = make(map[string]IgnoreHost, len(result))
-		for _, ignoreHost := range result {
-			IgnoreHosts[ignoreHost.Host] = ignoreHost
-		}
 	} else {
 		db = nil
 		c = nil
 		h = nil
 		rules = nil
 		ignores = nil
-		IgnoreHosts = make(map[string]IgnoreHost)
 	}
 
 	uuid.SwitchFormat(uuid.CleanHyphen)
@@ -380,11 +367,13 @@ func main() {
 	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		//ctx.Logf("Method: %s - host: %s", ctx.Resp.Request.Method, ctx.Resp.Request.Host)
 		if c != nil && c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp != nil && ctx.Resp.Request != nil && ctx.Resp.Request.Method != "CONNECT" && db != nil {
+			var ignoreHost IgnoreHost
 			// Ignore hosts
-			ignoreHost, ok := IgnoreHosts[ctx.Resp.Request.Host]
-			if ok && (len(ignoreHost.Paths) == 0 || Contains(ignoreHost.Paths, ctx.Resp.Request.URL.Path)) {
+			err := ignores.Find(bson.M{"active": true, "host": ctx.Resp.Request.Host}).One(&ignoreHost)
+			if err == nil && len(ignoreHost.Paths) == 0 || Contains(ignoreHost.Paths, ctx.Resp.Request.URL.Path) {
 				return resp
 			}
+
 			// get response content type
 			respctype := getContentType(ctx.Resp.Header.Get("Content-Type"))
 
