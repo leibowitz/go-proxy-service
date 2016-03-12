@@ -39,6 +39,10 @@ type Content struct {
 	SocketUUID []byte    "uuid"
 }
 
+type Origin struct {
+	DefaultIgnore bool "filterAll"
+}
+
 type Rewrite struct {
 	Host      string "host"
 	DHost     string "dhost"
@@ -139,6 +143,7 @@ func main() {
 	h := new(mgo.Collection)
 	rules := new(mgo.Collection)
 	ignores := new(mgo.Collection)
+	origins := new(mgo.Collection)
 
 	if len(*mongourl) != 0 {
 		// Mongo DB connection
@@ -172,6 +177,7 @@ func main() {
 		h = db.C("log_hostrewrite")
 		rules = db.C("log_rules")
 		ignores = db.C("log_ignores")
+		origins = db.C("origins")
 
 	} else {
 		db = nil
@@ -179,6 +185,7 @@ func main() {
 		h = nil
 		rules = nil
 		ignores = nil
+		origins = nil
 	}
 
 	uuid.SwitchFormat(uuid.CleanHyphen)
@@ -374,9 +381,41 @@ func main() {
 		if c != nil && c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp != nil && ctx.Resp.Request != nil && ctx.Resp.Request.Method != "CONNECT" && db != nil {
 			var ignoreHost IgnoreHost
 			// Ignore hosts
-			err := ignores.Find(bson.M{"active": true, "host": ctx.Resp.Request.Host}).One(&ignoreHost)
-			if err == nil && len(ignoreHost.Paths) == 0 || Contains(ignoreHost.Paths, ctx.Resp.Request.URL.Path) {
-				return resp
+			iter := ignores.Find(bson.M{"host": ctx.Resp.Request.Host}).Sort("-paths").Iter()
+			var record bool
+			for iter.Next(&ignoreHost) {
+				// If we have a path and we want to record this, then skip the other checks
+				if Contains(ignoreHost.Paths, ctx.Resp.Request.URL.Path) && ignoreHost.Active {
+					record = true
+					break
+				}
+				if len(ignoreHost.Paths) == 0 || Contains(ignoreHost.Paths, ctx.Resp.Request.URL.Path) {
+					// If we don't want to record this host or this path, skip it
+					if !ignoreHost.Active {
+						return resp
+					} else {
+						record = true
+					}
+				}
+			}
+			err := iter.Close()
+
+			if err != nil {
+				ctx.Warnf("Unable to check if request should be recorded: %s", err)
+			}
+
+			// If we didn't find a config for this host/path
+			if !record {
+				var settings Origin
+				err = origins.Find(bson.M{"origin": ctx.UserData.(ContextUserData).Origin}).One(&settings)
+				if err != nil {
+					ctx.Warnf("Unable to check origin settings: %s", err)
+				}
+
+				// Do not record this request if the default is to ignore
+				if settings.DefaultIgnore {
+					return resp
+				}
 			}
 
 			// get response content type
