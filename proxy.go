@@ -188,7 +188,12 @@ func main() {
 	proxy.OnRequest().HandleConnect(goproxy.AlwaysMitm)
 
 	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		origin := ipAddrFromRemoteAddr(ctx.Req.RemoteAddr)
+
+		var origin string
+		ctx.Logf("headers: %v", req.Header)
+		if origin = req.Header.Get("X-Forwarded-For"); origin == "" {
+			origin = ipAddrFromRemoteAddr(ctx.Req.RemoteAddr)
+		}
 		ctx.Logf("Origin: %s", origin)
 		/*ctx.RoundTripper = goproxy.RoundTripperFunc(func (req *http.Request, ctx *goproxy.ProxyCtx) (resp *http.Response, err error) {
 			//data := transport.RoundTripDetails{}
