@@ -260,6 +260,11 @@ func main() {
 			if len(ignoreHost.Paths) == 0 || Contains(ignoreHost.Paths, req.URL.Path) {
 				// If we don't want to record this host or this path, skip it
 				if !ignoreHost.Active {
+					ctx.Logf("Not recording: %v, %v", ignoreHost, ctx)
+					err := iter.Close()
+					if err != nil {
+						ctx.Warnf("Unable to check if request should be recorded: %s", err)
+					}
 					return req, nil
 				} else {
 					record = true
