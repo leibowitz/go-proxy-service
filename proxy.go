@@ -28,9 +28,9 @@ type ContextUserData struct {
 	Body  io.Reader
 	ReqId bson.ObjectId
 	//Body   []byte
-	Header      http.Header
-	Origin      string
-	ElapsedTime float32
+	Header              http.Header
+	Origin              string
+	ElapsedTime         float32
 	SaveAsDocumentation bool // Set to true if we have to record this into doc collection
 }
 
