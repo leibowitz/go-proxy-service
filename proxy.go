@@ -562,22 +562,36 @@ func (fs *FileStream) Write(b []byte) (nr int, err error) {
 }
 
 func (fs *FileStream) Close() error {
+
+	err := os.Remove(fs.path)
+
+	if err != nil {
+		fs.ctx.Warnf("Unable to delete file: %s", err)
+	}
+
 	fs.ctx.Logf("Closing file %s", fs.objectId)
+
 	if fs.f == nil {
 		return errors.New("FileStream was never written into")
 	}
+
 	fs.f.Seek(0, 0)
-	saveFileToMongo(fs.db, fs.objectId, fs.contentType, fs.f, fs.objectId.Hex(), fs.ctx)
-	err := fs.f.Close()
-	if err == nil {
-		fs.ctx.Logf("File closed %s", fs.objectId)
-		err2 := os.Remove(fs.path)
-		if err2 != nil {
-			fs.ctx.Logf("Unable to delete file: %s", err2)
-		}
-	} else {
-		fs.ctx.Logf("Failed to close file %s %s", fs.objectId, err.Error())
+
+	err = saveFileToMongo(fs.db, fs.objectId, fs.contentType, fs.f, fs.objectId.Hex(), fs.ctx)
+
+	if err != nil {
+		fs.ctx.Warnf("Unable to save file to GridFS: %s", err)
 	}
+
+	err = fs.f.Close()
+
+	if err != nil {
+		fs.ctx.Warnf("Failed to close file %s %s", fs.objectId, err.Error())
+		return err
+	}
+
+	fs.ctx.Logf("File closed %s", fs.objectId)
+
 	return err
 }
 
