@@ -2,12 +2,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"log"
 	"net/http"
 	"strconv"
-	//"fmt"
 	//"regexp"
 	"bytes"
 	"errors"
@@ -31,6 +31,7 @@ type ContextUserData struct {
 	Header      http.Header
 	Origin      string
 	ElapsedTime float32
+	SaveAsDocumentation bool // Set to true if we have to record this into doc collection
 }
 
 type Content struct {
@@ -146,6 +147,7 @@ func main() {
 	rules := new(mgo.Collection)
 	ignores := new(mgo.Collection)
 	origins := new(mgo.Collection)
+	doc := new(mgo.Collection)
 
 	if len(*mongourl) != 0 {
 		// Mongo DB connection
@@ -180,6 +182,7 @@ func main() {
 		rules = db.C("log_rules")
 		ignores = db.C("log_ignores")
 		origins = db.C("origins")
+		doc = db.C("documentation")
 
 	} else {
 		db = nil
@@ -188,6 +191,7 @@ func main() {
 		rules = nil
 		ignores = nil
 		origins = nil
+		doc = nil
 	}
 
 	uuid.SwitchFormat(uuid.CleanHyphen)
@@ -315,6 +319,24 @@ func main() {
 
 		//log.Printf("%+v", req)
 
+		// Look for a record for this host/path and method
+		b := bson.M{"$and": []bson.M{
+			bson.M{"request.host": req.Host},
+			bson.M{"request.method": req.Method},
+			bson.M{"request.path": req.URL.Path},
+		}}
+
+		ctx.Logf("Looking for a record for [%s] %s/%s", req.Method, req.Host, req.URL.Path)
+		count, err := doc.Find(b).Count()
+
+		var saveDoc bool
+		if err != nil {
+			ctx.Warnf("Unable to query doc collection: %s", err)
+		} else if count == 0 {
+			// No record found, store it!
+			saveDoc = true
+		}
+
 		var reqbody []byte
 
 		var bodyreader io.Reader
@@ -370,7 +392,7 @@ func main() {
 							ctx.Logf("Header: %+v", result.Response.Headers)
 
 							resp := NewResponse(req, result.Response.Headers, status, respfile)
-							ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: req.Header, Origin: origin}
+							ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: req.Header, Origin: origin, SaveAsDocumentation: saveDoc}
 							return req, resp
 						} else {
 							ctx.Logf("Couldn't retrieve the response body: %+v", err)
@@ -384,7 +406,7 @@ func main() {
 					ctx.Logf("Found a static rule matching, returning it: %+v", rule.Response)
 					resp := NewResponse(req, rule.RespHeader, status, respbody)
 					ctx.Delay = rule.Delay
-					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: req.Header, Origin: origin}
+					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: req.Header, Origin: origin, SaveAsDocumentation: saveDoc}
 					return req, resp
 				}
 				/*result := Content{}
@@ -433,7 +455,7 @@ func main() {
 			bodyreader = req.Body
 		}
 
-		ctx.UserData = ContextUserData{Store: true, Time: time.Now().UnixNano(), Body: bodyreader, Header: req.Header, Origin: origin}
+		ctx.UserData = ContextUserData{Store: true, Time: time.Now().UnixNano(), Body: bodyreader, Header: req.Header, Origin: origin, SaveAsDocumentation: saveDoc}
 		return req, nil
 	})
 
@@ -521,6 +543,35 @@ func main() {
 	log.Fatalln(http.ListenAndServe(*addr, proxy))
 }
 
+func saveAsDoc(fs *FileStream) error {
+	ctx := fs.ctx
+	ctx.Logf("Saving as documentation")
+	if ctx.UserData == nil {
+		return fmt.Errorf("UserData is nil")
+	}
+	doc := fs.db.C("documentation")
+	content := Content{
+		Request: Request{
+			Origin:  ctx.UserData.(ContextUserData).Origin,
+			Path:    ctx.Resp.Request.URL.Path,
+			Query:   ctx.Resp.Request.URL.Query().Encode(),
+			FileId:  ctx.UserData.(ContextUserData).ReqId,
+			Url:     ctx.Resp.Request.URL.String(),
+			Scheme:  ctx.Resp.Request.URL.Scheme,
+			Host:    ctx.Resp.Request.Host,
+			Method:  ctx.Resp.Request.Method,
+			Time:    ctx.UserData.(ContextUserData).ElapsedTime,
+			Headers: ctx.UserData.(ContextUserData).Header},
+		Response: Response{
+			Status:  ctx.Resp.StatusCode,
+			Headers: ctx.Resp.Header,
+			FileId:  fs.objectId},
+		SocketUUID: ctx.Uuid.Bytes(),
+		Date:       time.Now(),
+	}
+	return doc.Insert(content)
+}
+
 type TeeReadCloser struct {
 	r io.Reader
 	w io.WriteCloser
@@ -596,6 +647,12 @@ func (fs *FileStream) Close() error {
 
 	if err != nil {
 		fs.ctx.Warnf("Unable to save file to GridFS: %s", err)
+		// Check if we need to save as documentation as well
+	} else if fs.ctx.UserData != nil && fs.ctx.UserData.(ContextUserData).SaveAsDocumentation {
+		err = saveAsDoc(fs)
+		if err != nil {
+			fs.ctx.Warnf("Unable to save as doc: %s", err)
+		}
 	}
 
 	err = fs.f.Close()
