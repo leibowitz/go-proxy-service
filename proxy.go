@@ -26,9 +26,11 @@ type ContextUserData struct {
 	Store bool
 	Time  int64
 	Body  io.Reader
+	ReqId bson.ObjectId
 	//Body   []byte
-	Header http.Header
-	Origin string
+	Header      http.Header
+	Origin      string
+	ElapsedTime float32
 }
 
 type Content struct {
@@ -208,6 +210,26 @@ func main() {
 			//log.Printf("%+v", data)
 			return
 		})*/
+
+		method := req.Method
+		// Sanity check for appboy request from iOS Sdk sending incorrect requests
+		if len(method) > 10 {
+			ctx.Logf("Method is too long: %s", method)
+			valid := []string{"POST", "GET", "PATCH", "PUT", "DELETE", "OPTIONS", "TRACE", "HEAD", "CONNECT"}
+			for _, m := range valid {
+				if method[len(method)-len(m):len(method)] == m {
+					method = m
+					break
+				}
+			}
+
+			// Could not detect valid method, do not store this request
+			if method == req.Method {
+				return req, nil
+			}
+			// Override method
+			req.Method = method
+		}
 
 		rewrite := Rewrite{}
 		if h != nil && h.Database != nil {
@@ -428,6 +450,14 @@ func main() {
 
 			filename := filepath.Join(tmpdir, respid.Hex())
 
+			reqid := bson.NewObjectId()
+
+			userData := ctx.UserData.(ContextUserData)
+			userData.ReqId = reqid
+			userData.ElapsedTime = float32(time.Now().UnixNano()-ctx.UserData.(ContextUserData).Time) / 1.0e9
+
+			ctx.UserData = userData
+
 			//log.Printf("Duplicating Body file id: %s", respid.String())
 			fs, err := NewFileStream(filename, *db, respctype, respid, ctx)
 			if err != nil {
@@ -443,28 +473,13 @@ func main() {
 				reqctype = "text/plain"
 			}
 
-			reqid := bson.NewObjectId()
 			//log.Printf("Req id: %s, host: %s", reqid.Hex(), ctx.Resp.Request.Host)
 
-			saveFileToMongo(*db, reqid, reqctype, ctx.UserData.(ContextUserData).Body, reqid.Hex(), ctx)
-
-			method := ctx.Resp.Request.Method
-			// Sanity check for appboy request from iOS Sdk sending incorrect requests
-			if len(method) > 10 {
-				ctx.Logf("Method is too long: %s", method)
-				valid := []string{"POST", "GET", "PATCH", "PUT", "DELETE", "OPTIONS", "TRACE", "HEAD", "CONNECT"}
-				for _, m := range valid {
-					if method[len(method)-len(m):len(method)] == m {
-						method = m
-						break
-					}
-				}
-
-				// Could not detect valid method, do not store this request
-				if method == ctx.Resp.Request.Method {
-					return resp
-				}
+			err = saveFileToMongo(*db, reqid, reqctype, ctx.UserData.(ContextUserData).Body, reqid.Hex(), ctx)
+			if err != nil {
+				ctx.Warnf("Unable to save file to mongo: %s", err)
 			}
+
 			// prepare document
 			content := Content{
 				//Id: docid,
@@ -476,8 +491,8 @@ func main() {
 					Url:     ctx.Resp.Request.URL.String(),
 					Scheme:  ctx.Resp.Request.URL.Scheme,
 					Host:    ctx.Resp.Request.Host,
-					Method:  method,
-					Time:    float32(time.Now().UnixNano()-ctx.UserData.(ContextUserData).Time) / 1.0e9,
+					Method:  ctx.Resp.Request.Method,
+					Time:    ctx.UserData.(ContextUserData).ElapsedTime,
 					Headers: ctx.UserData.(ContextUserData).Header},
 				Response: Response{
 					Status:  ctx.Resp.StatusCode,
