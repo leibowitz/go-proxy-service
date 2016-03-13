@@ -596,29 +596,33 @@ func getMongoFileContent(ctx *goproxy.ProxyCtx, db mgo.Database, objId bson.Obje
 }
 
 // Store file in MongoDB GridFS
-func saveFileToMongo(db mgo.Database, objId bson.ObjectId, contentType string, openFile io.Reader, fileName string, ctx *goproxy.ProxyCtx) {
+func saveFileToMongo(db mgo.Database, objId bson.ObjectId, contentType string, openFile io.Reader, fileName string, ctx *goproxy.ProxyCtx) error {
 	ctx.Logf("db: %+v", db)
 	mdbfile, err := db.GridFS("fs").Create(fileName)
-	if err == nil {
-		mdbfile.SetContentType(contentType)
-		mdbfile.SetId(objId)
-		ctx.Logf("Copying to: %s", fileName)
-		_, err = io.Copy(mdbfile, openFile)
-		if err != nil {
-			ctx.Logf("Unable to copy to mongo: %s - %v", fileName, err)
-		} else {
-			ctx.Logf("Done copying")
-		}
+	if err != nil {
+		ctx.Warnf("Unable to create new GridFS file: %s", err)
+		return err
+	}
+	defer func(mdbfile *mgo.GridFile, ctx *goproxy.ProxyCtx) {
 		ctx.Logf("CLosing mdb file")
 		err = mdbfile.Close()
 		if err != nil {
-			ctx.Logf("Unable to close copy to mongo: %s", err)
-		} else {
-			ctx.Logf("MongoDB file closed")
+			ctx.Warnf("Unable to close copy to mongo: %s", err)
+			return
 		}
-	} else {
-		ctx.Logf("Unable to create new GridFS file: %s", err)
+		ctx.Logf("MongoDB file closed")
+	}(mdbfile, ctx)
+
+	mdbfile.SetContentType(contentType)
+	mdbfile.SetId(objId)
+	ctx.Logf("Copying to: %s", fileName)
+	_, err = io.Copy(mdbfile, openFile)
+	if err != nil {
+		ctx.Warnf("Unable to copy to mongo: %s - %v", fileName, err)
+		return err
 	}
+	ctx.Logf("Done copying")
+	return nil
 }
 
 func getContentType(s string) string {
