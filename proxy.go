@@ -220,6 +220,45 @@ func main() {
 			}
 		}
 
+		var ignoreHost IgnoreHost
+		// Ignore hosts
+		iter := ignores.Find(bson.M{"host": req.Host}).Sort("-paths").Iter()
+		var record bool
+		for iter.Next(&ignoreHost) {
+			// If we have a path and we want to record this, then skip the other checks
+			if Contains(ignoreHost.Paths, req.URL.Path) && ignoreHost.Active {
+				record = true
+				break
+			}
+			if len(ignoreHost.Paths) == 0 || Contains(ignoreHost.Paths, req.URL.Path) {
+				// If we don't want to record this host or this path, skip it
+				if !ignoreHost.Active {
+					return req, nil
+				} else {
+					record = true
+				}
+			}
+		}
+		err := iter.Close()
+
+		if err != nil {
+			ctx.Warnf("Unable to check if request should be recorded: %s", err)
+		}
+
+		// If we didn't find a config for this host/path
+		if !record {
+			var settings Origin
+			err = origins.Find(bson.M{"origin": origin}).One(&settings)
+			if err != nil {
+				ctx.Warnf("Unable to check origin settings: %s", err)
+			}
+
+			// Do not record this request if the default is to ignore
+			if settings.DefaultIgnore {
+				return req, nil
+			}
+		}
+
 		//log.Printf("%+v", getHost(req.RemoteAddr))
 		/*if ctx.UserData != nil {
 			from = ctx.UserData.(*transport.RoundTripDetails).TCPAddr.String()
@@ -379,45 +418,6 @@ func main() {
 	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		//ctx.Logf("Method: %s - host: %s", ctx.Resp.Request.Method, ctx.Resp.Request.Host)
 		if c != nil && c.Database != nil && ctx.UserData != nil && ctx.UserData.(ContextUserData).Store && ctx.Resp != nil && ctx.Resp.Request != nil && ctx.Resp.Request.Method != "CONNECT" && db != nil {
-			var ignoreHost IgnoreHost
-			// Ignore hosts
-			iter := ignores.Find(bson.M{"host": ctx.Resp.Request.Host}).Sort("-paths").Iter()
-			var record bool
-			for iter.Next(&ignoreHost) {
-				// If we have a path and we want to record this, then skip the other checks
-				if Contains(ignoreHost.Paths, ctx.Resp.Request.URL.Path) && ignoreHost.Active {
-					record = true
-					break
-				}
-				if len(ignoreHost.Paths) == 0 || Contains(ignoreHost.Paths, ctx.Resp.Request.URL.Path) {
-					// If we don't want to record this host or this path, skip it
-					if !ignoreHost.Active {
-						return resp
-					} else {
-						record = true
-					}
-				}
-			}
-			err := iter.Close()
-
-			if err != nil {
-				ctx.Warnf("Unable to check if request should be recorded: %s", err)
-			}
-
-			// If we didn't find a config for this host/path
-			if !record {
-				var settings Origin
-				err = origins.Find(bson.M{"origin": ctx.UserData.(ContextUserData).Origin}).One(&settings)
-				if err != nil {
-					ctx.Warnf("Unable to check origin settings: %s", err)
-				}
-
-				// Do not record this request if the default is to ignore
-				if settings.DefaultIgnore {
-					return resp
-				}
-			}
-
 			// get response content type
 			respctype := getContentType(ctx.Resp.Header.Get("Content-Type"))
 
