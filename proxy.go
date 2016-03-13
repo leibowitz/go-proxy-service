@@ -319,24 +319,6 @@ func main() {
 
 		//log.Printf("%+v", req)
 
-		// Look for a record for this host/path and method
-		b := bson.M{"$and": []bson.M{
-			bson.M{"request.host": req.Host},
-			bson.M{"request.method": req.Method},
-			bson.M{"request.path": req.URL.Path},
-		}}
-
-		ctx.Logf("Looking for a record for [%s] %s/%s", req.Method, req.Host, req.URL.Path)
-		count, err := doc.Find(b).Count()
-
-		var saveDoc bool
-		if err != nil {
-			ctx.Warnf("Unable to query doc collection: %s", err)
-		} else if count == 0 {
-			// No record found, store it!
-			saveDoc = true
-		}
-
 		var reqbody []byte
 
 		var bodyreader io.Reader
@@ -392,7 +374,7 @@ func main() {
 							ctx.Logf("Header: %+v", result.Response.Headers)
 
 							resp := NewResponse(req, result.Response.Headers, status, respfile)
-							ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: req.Header, Origin: origin, SaveAsDocumentation: saveDoc}
+							ctx.UserData = ContextUserData{Store: true, Time: 0, Body: req.Body, Header: req.Header, Origin: origin}
 							return req, resp
 						} else {
 							ctx.Logf("Couldn't retrieve the response body: %+v", err)
@@ -406,7 +388,7 @@ func main() {
 					ctx.Logf("Found a static rule matching, returning it: %+v", rule.Response)
 					resp := NewResponse(req, rule.RespHeader, status, respbody)
 					ctx.Delay = rule.Delay
-					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: req.Header, Origin: origin, SaveAsDocumentation: saveDoc}
+					ctx.UserData = ContextUserData{Store: true, Time: 0, Body: reqbody, Header: req.Header, Origin: origin}
 					return req, resp
 				}
 				/*result := Content{}
@@ -455,7 +437,7 @@ func main() {
 			bodyreader = req.Body
 		}
 
-		ctx.UserData = ContextUserData{Store: true, Time: time.Now().UnixNano(), Body: bodyreader, Header: req.Header, Origin: origin, SaveAsDocumentation: saveDoc}
+		ctx.UserData = ContextUserData{Store: true, Time: time.Now().UnixNano(), Body: bodyreader, Header: req.Header, Origin: origin}
 		return req, nil
 	})
 
@@ -477,6 +459,24 @@ func main() {
 			userData := ctx.UserData.(ContextUserData)
 			userData.ReqId = reqid
 			userData.ElapsedTime = float32(time.Now().UnixNano()-ctx.UserData.(ContextUserData).Time) / 1.0e9
+
+			// Look for a record for this host/path and method
+			b := bson.M{"$and": []bson.M{
+				bson.M{"request.host": ctx.Resp.Request.Host},
+				bson.M{"request.method": ctx.Resp.Request.Method},
+				bson.M{"request.path": ctx.Resp.Request.URL.Path},
+				bson.M{"response.status": ctx.Resp.StatusCode},
+			}}
+
+			ctx.Logf("Looking for a record for [%s-%d] %s/%s", ctx.Resp.Request.Method, ctx.Resp.StatusCode, ctx.Resp.Request.Host, ctx.Resp.Request.URL.Path)
+			count, err := doc.Find(b).Count()
+
+			if err != nil {
+				ctx.Warnf("Unable to query doc collection: %s", err)
+			} else if count == 0 {
+				// No record found, store it!
+				userData.SaveAsDocumentation = true
+			}
 
 			ctx.UserData = userData
 
