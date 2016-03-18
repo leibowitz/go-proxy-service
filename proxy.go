@@ -148,6 +148,7 @@ func main() {
 	ignores := new(mgo.Collection)
 	origins := new(mgo.Collection)
 	doc := new(mgo.Collection)
+	docsettings := new(mgo.Collection)
 
 	if len(*mongourl) != 0 {
 		// Mongo DB connection
@@ -183,6 +184,7 @@ func main() {
 		ignores = db.C("log_ignores")
 		origins = db.C("origins")
 		doc = db.C("documentation")
+		docsettings = db.C("docsettings")
 
 	} else {
 		db = nil
@@ -192,6 +194,7 @@ func main() {
 		ignores = nil
 		origins = nil
 		doc = nil
+		docsettings = nil
 	}
 
 	uuid.SwitchFormat(uuid.CleanHyphen)
@@ -466,22 +469,27 @@ func main() {
 			userData.ReqId = reqid
 			userData.ElapsedTime = float32(time.Now().UnixNano()-ctx.UserData.(ContextUserData).Time) / 1.0e9
 
-			// Look for a record for this host/path and method
-			b := bson.M{"$and": []bson.M{
-				bson.M{"request.host": ctx.Resp.Request.Host},
-				bson.M{"request.method": ctx.Resp.Request.Method},
-				bson.M{"request.path": ctx.Resp.Request.URL.Path},
-				bson.M{"response.status": ctx.Resp.StatusCode},
-			}}
-
-			ctx.Logf("Looking for a record for [%s-%d] %s/%s", ctx.Resp.Request.Method, ctx.Resp.StatusCode, ctx.Resp.Request.Host, ctx.Resp.Request.URL.Path)
-			count, err := doc.Find(b).Count()
-
+			count, err := docsettings.Find(bson.M{"request.host": ctx.Resp.Request.Host, "active": true}).Count()
 			if err != nil {
-				ctx.Warnf("Unable to query doc collection: %s", err)
-			} else if count == 0 {
-				// No record found, store it!
-				userData.SaveAsDocumentation = true
+				ctx.Warnf("Unable to check doc settings for host %s", ctx.Resp.Request.Host)
+			} else if count != 0 {
+				// Look for a record for this host/path and method
+				b := bson.M{"$and": []bson.M{
+					bson.M{"request.host": ctx.Resp.Request.Host},
+					bson.M{"request.method": ctx.Resp.Request.Method},
+					bson.M{"request.path": ctx.Resp.Request.URL.Path},
+					bson.M{"response.status": ctx.Resp.StatusCode},
+				}}
+
+				ctx.Logf("Looking for a record for [%s-%d] %s%s", ctx.Resp.Request.Method, ctx.Resp.StatusCode, ctx.Resp.Request.Host, ctx.Resp.Request.URL.Path)
+				count, err := doc.Find(b).Count()
+
+				if err != nil {
+					ctx.Warnf("Unable to query doc collection: %s", err)
+				} else if count == 0 {
+					// No record found, store it!
+					userData.SaveAsDocumentation = true
+				}
 			}
 
 			ctx.UserData = userData
@@ -540,7 +548,9 @@ func main() {
 			if fs != nil {
 				resp.Body = NewTeeReadCloser(resp.Body, fs)
 			}
+
 		}
+
 		return resp
 	})
 
