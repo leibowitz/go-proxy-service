@@ -283,7 +283,7 @@ func main() {
 		// If we didn't find a config for this host/path
 		if !record {
 			var settings Origin
-			err = origins.Find(bson.M{"origin": origin}).One(&settings)
+			err := origins.Find(bson.M{"origin": origin}).One(&settings)
 			if err != nil {
 				ctx.Warnf("Unable to check origin settings: %s", err)
 			}
