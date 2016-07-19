@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/leibowitz/goproxy"
-	"github.com/twinj/uuid"
 )
 
 type ContextUserData struct {
@@ -197,7 +196,6 @@ func main() {
 		docsettings = nil
 	}
 
-	uuid.SwitchFormat(uuid.CleanHyphen)
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = *verbose
 
