@@ -150,6 +150,7 @@ func main() {
 	docsettings := new(mgo.Collection)
 
 	if len(*mongourl) != 0 {
+		log.Printf("Connecting to mongodb %s", *mongourl)
 		// Mongo DB connection
 		info, err := mgo.ParseURL(*mongourl)
 		if err != nil {
