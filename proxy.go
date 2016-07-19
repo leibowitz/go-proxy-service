@@ -469,7 +469,7 @@ func main() {
 			userData.ReqId = reqid
 			userData.ElapsedTime = float32(time.Now().UnixNano()-ctx.UserData.(ContextUserData).Time) / 1.0e9
 
-			count, err := docsettings.Find(bson.M{"request.host": ctx.Resp.Request.Host, "active": true}).Count()
+			count, err := docsettings.Find(bson.M{"host": ctx.Resp.Request.Host, "active": true}).Count()
 			if err != nil {
 				ctx.Warnf("Unable to check doc settings for host %s", ctx.Resp.Request.Host)
 			} else if count != 0 {
