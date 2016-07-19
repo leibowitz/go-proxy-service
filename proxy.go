@@ -248,34 +248,36 @@ func main() {
 			}
 		}
 
-		var ignoreHost IgnoreHost
-		// Ignore hosts
-		iter := ignores.Find(bson.M{"host": req.Host}).Sort("-paths").Iter()
 		var record bool
-		for iter.Next(&ignoreHost) {
-			// If we have a path and we want to record this, then skip the other checks
-			if Contains(ignoreHost.Paths, req.URL.Path) && ignoreHost.Active {
-				record = true
-				break
-			}
-			if len(ignoreHost.Paths) == 0 || Contains(ignoreHost.Paths, req.URL.Path) {
-				// If we don't want to record this host or this path, skip it
-				if !ignoreHost.Active {
-					ctx.Logf("Not recording: %v, %v", ignoreHost, ctx)
-					err := iter.Close()
-					if err != nil {
-						ctx.Warnf("Unable to check if request should be recorded: %s", err)
-					}
-					return req, nil
-				} else {
+		// Ignore hosts
+		if ignores != nil {
+			iter := ignores.Find(bson.M{"host": req.Host}).Sort("-paths").Iter()
+			var ignoreHost IgnoreHost
+			for iter.Next(&ignoreHost) {
+				// If we have a path and we want to record this, then skip the other checks
+				if Contains(ignoreHost.Paths, req.URL.Path) && ignoreHost.Active {
 					record = true
+					break
+				}
+				if len(ignoreHost.Paths) == 0 || Contains(ignoreHost.Paths, req.URL.Path) {
+					// If we don't want to record this host or this path, skip it
+					if !ignoreHost.Active {
+						ctx.Logf("Not recording: %v, %v", ignoreHost, ctx)
+						err := iter.Close()
+						if err != nil {
+							ctx.Warnf("Unable to check if request should be recorded: %s", err)
+						}
+						return req, nil
+					} else {
+						record = true
+					}
 				}
 			}
-		}
-		err := iter.Close()
+			err := iter.Close()
 
-		if err != nil {
-			ctx.Warnf("Unable to check if request should be recorded: %s", err)
+			if err != nil {
+				ctx.Warnf("Unable to check if request should be recorded: %s", err)
+			}
 		}
 
 		// If we didn't find a config for this host/path
