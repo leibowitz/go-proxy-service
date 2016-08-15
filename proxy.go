@@ -242,7 +242,9 @@ func main() {
 		if h != nil && h.Database != nil {
 			err := h.Find(bson.M{"host": req.Host, "active": true}).One(&rewrite)
 			if err == nil {
-				req.URL.Scheme = rewrite.DProtocol
+				if rewrite.DProtocol != "" {
+					req.URL.Scheme = rewrite.DProtocol
+				}
 				req.URL.Host = rewrite.DHost
 				req.Host = rewrite.DHost
 				ctx.Logf("Rewrite: %+v, URL: %+v", rewrite, req.URL)
