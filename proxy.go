@@ -118,6 +118,81 @@ func Contains(hosts []string, host string) bool {
 	return false
 }
 
+func ShouldMitmReq(ignores *mgo.Collection) goproxy.ReqConditionFunc {
+	return func(req *http.Request, ctx *goproxy.ProxyCtx) bool {
+		host := req.Host
+		ctx.Logf("Host: %s", host)
+		host = strings.Replace(host, ":443", "", -1)
+		ctx.Logf("Host: %s", host)
+		// Default, if no rule found, is ...
+		listenToAll := false
+		if ignores != nil {
+
+			var reqQuery bson.M
+			if !listenToAll {
+				// if default is to not record any traffic for unknown host
+				// then look for a rule that would enable recording for a host
+				reqQuery = bson.M{"$or": []bson.M{
+						bson.M{
+							"host": host,
+							"paths": bson.M{"$exists": true},
+						},
+						bson.M{
+							"host": host,
+							"paths": bson.M{"$exists": false},
+							"active": true,
+						},
+					},
+				}
+			} else {
+				// if default is to record traffic for all hosts
+				// then look for a rule that disable recording for a host
+				reqQuery = bson.M{
+					"host": host,
+					"active": false,
+					"paths": bson.M{"$exists": false},
+				}
+			}
+
+			count, err := ignores.Find(reqQuery).Count()
+			ctx.Logf("Host %s CONNECT check returned %d results for query: %v", host, count, reqQuery)
+			if err != nil {
+				ctx.Warnf("Unable to check host %s in ignore list: %s", host, err)
+			} else if count != 0 {
+				if listenToAll {
+					ctx.Logf("Disabling MitmConnect for %s", host)
+				} else {
+					ctx.Logf("Enabling MitmConnect for %s", host)
+				}
+				// Change the default if we found a rule that matches
+				listenToAll = !listenToAll
+			} else if !listenToAll {
+				reqQuery = bson.M{
+					"host": host,
+					"paths": bson.M{"$exists": false},
+					"active": false,
+				}
+				var ignoreHost IgnoreHost
+				err := ignores.Find(reqQuery).One(&ignoreHost)
+				if err != nil {
+					if err == mgo.ErrNotFound {
+					//if nferr, ok := err.(mgo.ErrNotFound); ok {
+						ignoreHost.Host = host
+						err := ignores.Insert(bson.M{"host": host, "active": false})
+						if err != nil {
+							ctx.Warnf("Unable to insert host %s blacklist in ignore list: %s", host, err)
+						}
+					} else {
+						ctx.Warnf("Unable to check host %s blacklist in ignore list: %s", host, err)
+					}
+				}
+			}
+		}
+		ctx.Logf("Host: %s, %v", host, listenToAll)
+		return listenToAll
+	}
+}
+
 func main() {
 	verbose := flag.Bool("v", false, "should every proxy request be logged to stdout")
 	mongourl := flag.String("mongourl", "", "record request/response in mongodb")
@@ -200,7 +275,7 @@ func main() {
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = *verbose
 
-	proxy.OnRequest().HandleConnect(goproxy.AlwaysMitm)
+	proxy.OnRequest(ShouldMitmReq(ignores)).HandleConnect(goproxy.AlwaysMitm)
 
 	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
 		ctx.UserData = nil
